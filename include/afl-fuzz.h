@@ -157,7 +157,9 @@ struct queue_entry {
   u32 id;                               /* entry number in queue_buf        */
 
   u8 colorized,                         /* Do not run redqueen stage again  */
-      cal_failed;                       /* Calibration failed?              */
+      cal_failed,                       /* Calibration failed?              */
+      hashfuzzClass;                    /* What hashfuzz partition does this input fall into? */
+
   bool trim_done,                       /* Trimmed?                         */
       was_fuzzed,                       /* historical, but needed for MOpt  */
       passed_det,                       /* Deterministic stages passed?     */
@@ -520,7 +522,8 @@ typedef struct afl_state {
       expand_havoc,                /* perform expensive havoc after no find */
       cycle_schedules,                  /* cycle power schedules?           */
       old_seed_selection,               /* use vanilla afl seed selection   */
-      reinit_table;                     /* reinit the queue weight table    */
+      reinit_table,                     /* reinit the queue weight table    */
+      hashfuzz_partitions;              /* number of hashfuzz partitions    */
 
   u8 *virgin_bits,                      /* Regions yet untouched by fuzzing */
       *virgin_tmout,                    /* Bits we haven't seen in tmouts   */
@@ -1031,7 +1034,7 @@ void        deinit_py(void *);
 void mark_as_det_done(afl_state_t *, struct queue_entry *);
 void mark_as_variable(afl_state_t *, struct queue_entry *);
 void mark_as_redundant(afl_state_t *, struct queue_entry *, u8);
-void add_to_queue(afl_state_t *, u8 *, u32, u8);
+void add_to_queue(afl_state_t *, u8 *, u32, u8, u8);
 void destroy_queue(afl_state_t *);
 void update_bitmap_score(afl_state_t *, struct queue_entry *);
 void cull_queue(afl_state_t *);

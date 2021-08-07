@@ -26,6 +26,7 @@
 #include "afl-fuzz.h"
 #include <limits.h>
 #include "cmplog.h"
+#include "hashfuzz.h"
 
 #ifdef HAVE_AFFINITY
 
@@ -768,8 +769,10 @@ void read_testcases(afl_state_t *afl, u8 *directory) {
 
       if (!access(dfn, F_OK)) { passed_det = 1; }
 
+      // Start with hashfuzz partition = 0, during the dry runs it will be set
+
       add_to_queue(afl, fn2, st.st_size >= MAX_FILE ? MAX_FILE : st.st_size,
-                   passed_det);
+                   passed_det, 0);
 
       if (unlikely(afl->shm.cmplog_mode)) {
 
@@ -888,6 +891,8 @@ void perform_dry_run(afl_state_t *afl) {
     }
 
     close(fd);
+
+    q->hashfuzzClass = hashfuzzClassify(use_mem, read_len, afl->hashfuzz_partitions);
 
     res = calibrate_case(afl, q, use_mem, 0, 1);
 

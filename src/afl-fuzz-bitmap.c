@@ -24,6 +24,7 @@
  */
 
 #include "afl-fuzz.h"
+#include "hashfuzz.h"
 #include <limits.h>
 #if !defined NAME_MAX
   #define NAME_MAX _XOPEN_NAME_MAX
@@ -483,12 +484,34 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
   if (likely(fault == afl->crash_mode)) {
 
+    bool interesting = false;
+
     /* Keep only if there are new bits in the map, add to queue for
        future fuzzing, etc. */
 
-    new_bits = has_new_bits_unclassified(afl, afl->virgin_bits);
+    interesting = has_new_bits_unclassified(afl, afl->virgin_bits);
 
-    if (likely(!new_bits)) {
+    // Find out if we have a matching path with this hashfuzz classification
+
+    u8 hashfuzzClass = hashfuzzClassify(mem, len, afl->hashfuzz_partitions);
+
+    if (!interesting) {
+      bool unique = true;
+      struct queue_entry *q;
+
+      for (u32 i = 0; i < afl->queued_paths; i++) {
+        q = afl->queue_buf[i];
+        if (q->exec_cksum == cksum && q->hashfuzzClass == hashfuzzClass) {
+          unique = false;
+          break;
+        }  
+      }
+
+      interesting = unique;
+    }
+
+
+    if (likely(!interesting)) {
 
       if (unlikely(afl->crash_mode)) { ++afl->total_crashes; }
       return 0;
@@ -513,7 +536,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", queue_fn); }
     ck_write(fd, mem, len, queue_fn);
     close(fd);
-    add_to_queue(afl, queue_fn, len, 0);
+    add_to_queue(afl, queue_fn, len, 0, hashfuzzClass);
 
 #ifdef INTROSPECTION
     if (afl->custom_mutators_count && afl->current_custom_fuzz) {

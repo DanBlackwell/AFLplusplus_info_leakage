@@ -23,6 +23,7 @@
  */
 
 #include "afl-fuzz.h"
+#include "hashfuzz.c"
 #include <limits.h>
 #include <ctype.h>
 #include <math.h>
@@ -428,7 +429,7 @@ static u8 check_if_text(afl_state_t *afl, struct queue_entry *q) {
 
 /* Append new test case to the queue. */
 
-void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det) {
+void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det, u8 hashfuzzClass) {
 
   struct queue_entry *q = ck_alloc(sizeof(struct queue_entry));
 
@@ -439,6 +440,7 @@ void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det) {
   q->trace_mini = NULL;
   q->testcase_buf = NULL;
   q->mother = afl->queue_cur;
+  q->hashfuzzClass = hashfuzzClass;
 
 #ifdef INTROSPECTION
   q->bitsmap_size = afl->bitsmap_size;
