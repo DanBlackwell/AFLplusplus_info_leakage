@@ -154,6 +154,7 @@ struct queue_entry {
 
   u8 *fname;                            /* File name for the test case      */
   u32 len;                              /* Input length                     */
+  u32 compressed_len;                   /* compressed length (lz4)          */
   u32 id;                               /* entry number in queue_buf        */
 
   u8 colorized,                         /* Do not run redqueen stage again  */
@@ -554,7 +555,8 @@ typedef struct afl_state {
       var_byte_count,                   /* Bitmap bytes with var behavior   */
       current_entry,                    /* Current queue entry ID           */
       havoc_div,                        /* Cycle count divisor for havoc    */
-      max_det_extras;                   /* deterministic extra count (dicts)*/
+      max_det_extras,                   /* deterministic extra count (dicts)*/
+      longest_input_queued;             /* length of the longest input      */
 
   u64 total_crashes,                    /* Total number of crashes          */
       unique_crashes,                   /* Crashes with unique signatures   */
@@ -1036,6 +1038,7 @@ void destroy_queue(afl_state_t *);
 void update_bitmap_score(afl_state_t *, struct queue_entry *);
 void cull_queue(afl_state_t *);
 u32  calculate_score(afl_state_t *, struct queue_entry *);
+void reorder_queue_NCD(afl_state_t *);
 
 /* Bitmap */
 

@@ -23,6 +23,7 @@
  */
 
 #include "afl-fuzz.h"
+#include "lz4.h"
 #include <limits.h>
 #include <ctype.h>
 #include <math.h>
@@ -429,6 +430,9 @@ static u8 check_if_text(afl_state_t *afl, struct queue_entry *q) {
 /* Append new test case to the queue. */
 
 void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det) {
+
+  if (len > afl->longest_input_queued)
+    afl->longest_input_queued = len;
 
   struct queue_entry *q = ck_alloc(sizeof(struct queue_entry));
 
@@ -1280,3 +1284,87 @@ inline void queue_testcase_store_mem(afl_state_t *afl, struct queue_entry *q,
 
 }
 
+/* Calc NCD - we will pass in compressedData as we've already malloced it */
+
+float calc_NCD(afl_state_t *afl, 
+               struct queue_entry *a, 
+               struct queue_entry *b, 
+               u8 *compressedData, 
+               u32 maxCompressedLen, 
+               u8 *uncompressedData) {
+
+  if (!a->compressed_len) {
+    u8 *input_buf = a->testcase_buf;
+
+    if (!input_buf)
+      input_buf = queue_testcase_get(afl, a);
+    
+    a->compressed_len = LZ4_compress_default(input_buf, 
+                                             compressedData, 
+                                             a->len, 
+                                             maxCompressedLen);
+  }
+
+  if (!b->compressed_len) {
+    u8 *input_buf = b->testcase_buf;
+
+    if (!input_buf)
+      input_buf = queue_testcase_get(afl, b);
+    
+    b->compressed_len = LZ4_compress_default(input_buf, 
+                                             compressedData, 
+                                             b->len, 
+                                             maxCompressedLen);
+  }
+
+  memcpy(uncompressedData, a->testcase_buf, a->len);
+  memcpy(uncompressedData + a->len, b->testcase_buf, b->len);
+  s32 concatCompressedLen = LZ4_compress_default(uncompressedData, 
+                                                 compressedData,
+                                                 a->len + b->len, 
+                                                 maxCompressedLen);
+
+  u32 min = a->compressed_len < b->compressed_len ? 
+              a->compressed_len : 
+              b->compressed_len;
+
+  u32 max = a->compressed_len > b->compressed_len ?
+              a->compressed_len : 
+              b->compressed_len;
+
+  return ((float)concatCompressedLen - min) / (float)max;
+}
+
+/* Reorder the queue based on the NCD between test cases */
+
+void reorder_queue_NCD(afl_state_t *afl) {
+  static u32 prevLongest = 0;
+  static u8 *uncompressedData = NULL;
+  static u8 *compressedData = NULL;
+
+  if (afl->longest_input_queued > prevLongest) {
+    prevLongest = afl->longest_input_queued;
+    if (!realloc(uncompressedData, 2 * prevLongest))
+      printf("Realloc failed\n");
+    if (!realloc(compressedData, LZ4_COMPRESSBOUND(2 * prevLongest)))
+      printf("Realloc failed\n");
+  }
+
+  printf("Finding largest NCD, current queue index: %d\n", afl->current_entry);
+
+  float largestNCD = 0.0; int largestNCDindex = -1; 
+  int iterations = afl->queued_paths - afl->current_entry < 100 ?
+                     afl->queued_paths - afl->current_entry :
+                     100;
+
+  for (int i = 0; i < iterations; i++) {
+    float calced = calc_NCD(afl, &afl->queue[afl->current_entry], &afl->queue[i],
+                            compressedData, 2 * prevLongest, uncompressedData);
+
+    if (calced > largestNCD) {
+      printf("New largest NCD at index %d: %f vs old %f\n", i, calced, largestNCD);
+      largestNCD = calced;
+      largestNCDindex = i;
+    }
+  }
+}
