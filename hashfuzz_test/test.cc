@@ -2,25 +2,26 @@
 #include <stdint.h>
 
 int classifyMyNumber(const uint8_t *data, size_t size) {
-    int classify = 0;
+    unsigned char classify = 0;
+    int retval = 0;
     
     for (int i = 0; i < size; i++) {
-        classify += data[i];
+        classify ^= data[i];
     }
 
     if (classify % 64 == 0) {
-        return 1;
+        retval = 12;
     }
 
     if (classify > 245) {
-        return 4;
+        retval = 4;
     }
 
     if (classify < 38) {
-        return 6;
+        retval = 6;
     }
 
-    return 2;
+    return retval;
 }
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {

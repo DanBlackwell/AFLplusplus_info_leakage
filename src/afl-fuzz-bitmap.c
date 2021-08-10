@@ -495,19 +495,24 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
     u8 hashfuzzClass = hashfuzzClassify(mem, len, afl->hashfuzz_partitions);
 
-    if (!interesting) {
-      bool unique = true;
+    if (afl->hashfuzz_partitions > 1 && !interesting) {
       struct queue_entry *q;
+      cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
+      bool path_in_queue = false, duplicate = false;
 
       for (u32 i = 0; i < afl->queued_paths; i++) {
         q = afl->queue_buf[i];
-        if (q->exec_cksum == cksum && q->hashfuzzClass == hashfuzzClass) {
-          unique = false;
-          break;
+        if (q->exec_cksum == cksum) {
+ 	  if (q->hashfuzzClass != hashfuzzClass) {
+            path_in_queue = true;
+	  } else {
+            duplicate = true;
+            break;
+	  }
         }  
       }
 
-      interesting = unique;
+      interesting = path_in_queue && !duplicate;
     }
 
 
@@ -536,7 +541,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", queue_fn); }
     ck_write(fd, mem, len, queue_fn);
     close(fd);
-    add_to_queue(afl, queue_fn, len, 0, hashfuzzClass);
+    add_to_queue(afl, queue_fn, len, 0, hashfuzzClass, cksum);
 
 #ifdef INTROSPECTION
     if (afl->custom_mutators_count && afl->current_custom_fuzz) {

@@ -99,6 +99,7 @@ static void usage(u8 *argv0, int more_help) {
       "Required parameters:\n"
       "  -i dir        - input directory with test cases\n"
       "  -o dir        - output directory for fuzzer findings\n\n"
+      "  -H partitions - number of hashfuzz partitions to use\n\n"
 
       "Execution control settings:\n"
       "  -p schedule   - power schedules compute a seed's performance score:\n"
@@ -421,7 +422,7 @@ int main(int argc, char **argv_orig, char **envp) {
   if (afl->shm.map_size) { afl->fsrv.map_size = afl->shm.map_size; }
   exit_1 = !!afl->afl_env.afl_bench_just_one;
 
-  afl->hashfuzz_partitions = 8;
+  afl->hashfuzz_partitions = 0;
 
   SAYF(cCYA "afl-fuzz" VERSION cRST
             " based on afl by Michal Zalewski and a large online community\n");
@@ -435,7 +436,7 @@ int main(int argc, char **argv_orig, char **envp) {
 
   while ((opt = getopt(
               argc, argv,
-              "+b:B:c:CdDe:E:hi:I:f:F:l:L:m:M:nNOo:p:RQs:S:t:T:UV:Wx:Z")) > 0) {
+              "+b:B:c:CdDe:E:hH:i:I:f:F:l:L:m:M:nNOo:p:RQs:S:t:T:UV:Wx:Z")) > 0) {
 
     switch (opt) {
 
@@ -1090,6 +1091,21 @@ int main(int argc, char **argv_orig, char **envp) {
 
       } break;
 
+      case 'H': {                                                /* hashfuzz */
+
+        if (!optarg ||
+            sscanf(optarg, "%hhu", &afl->hashfuzz_partitions) < 1 ||
+            optarg[0] == '-') {
+
+          FATAL("Bad syntax used for -t");
+
+        }
+
+        break;
+
+      }
+
+
       case 'h':
         show_help++;
         break;  // not needed
@@ -1109,7 +1125,7 @@ int main(int argc, char **argv_orig, char **envp) {
 
   }
 
-  if (optind == argc || !afl->in_dir || !afl->out_dir || show_help) {
+  if (optind == argc || !afl->hashfuzz_partitions || !afl->in_dir || !afl->out_dir || show_help) {
 
     usage(argv[0], show_help);
 
@@ -1756,6 +1772,8 @@ int main(int argc, char **argv_orig, char **envp) {
       setenv("AFL_NO_AUTODICT", "1", 1);  // loaded already
       afl_fsrv_start(&afl->fsrv, afl->argv, &afl->stop_soon,
                      afl->afl_env.afl_debug_child);
+            
+      printf("Growing map size from %d to %d\n\n", map_size, new_map_size);
 
       map_size = new_map_size;
 

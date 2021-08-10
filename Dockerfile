@@ -75,5 +75,8 @@ ENV IS_DOCKER="1"
 COPY ./hashfuzz_test /aflPPtests
 WORKDIR /aflPPtests
 
-CMD afl-clang-fast++ -fsanitize=fuzzer -o test_prog test.cc && \
-    timeout 300 afl-fuzz -i IN -o OUT -- ./test_prog
+CMD export RUNTIME=$(( 180 )); afl-clang-fast -o test_prog driver.c triangle.c -I . && \
+    mkdir -p OUT_16_branches && timeout $RUNTIME afl-fuzz -H 16 -i IN -o OUT_16_branches -- ./test_prog; echo "$(ls OUT_16_branches/default/queue | wc -l) items in queue"; \
+    mkdir -p OUT_8_branches && timeout $RUNTIME afl-fuzz -H 8 -i IN -o OUT_8_branches -- ./test_prog; echo "$(ls OUT_8_branches/default/queue | wc -l) items in queue"; \
+    mkdir -p OUT_4_branches && timeout $RUNTIME afl-fuzz -H 4 -i IN -o OUT_4_branches -- ./test_prog; echo "$(ls OUT_4_branches/default/queue | wc -l) items in queue"; \
+    mkdir -p OUT_1_branch   && timeout $RUNTIME afl-fuzz -H 1 -i IN -o OUT_1_branch -- ./test_prog; echo "$(ls OUT_1_branch/default/queue | wc -l) items in queue";

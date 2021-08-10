@@ -772,7 +772,7 @@ void read_testcases(afl_state_t *afl, u8 *directory) {
       // Start with hashfuzz partition = 0, during the dry runs it will be set
 
       add_to_queue(afl, fn2, st.st_size >= MAX_FILE ? MAX_FILE : st.st_size,
-                   passed_det, 0);
+                   passed_det, 0, 0);
 
       if (unlikely(afl->shm.cmplog_mode)) {
 
