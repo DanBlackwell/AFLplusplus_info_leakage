@@ -27,6 +27,7 @@
 #include <limits.h>
 #include <ctype.h>
 #include <math.h>
+#include <time.h>
 
 /* select next queue entry based on alias algo - fast! */
 
@@ -1347,10 +1348,12 @@ float calc_NCD(afl_state_t *afl,
 /* Reorder the queue based on the NCD between test cases */
 
 void reorder_queue_NCD(afl_state_t *afl) {
+  clock_t start = clock();
   static u32 prevLongest = 0;
   static u32 maxCompressedLen = 0;
   static u8 *uncompressedData = NULL;
   static u8 *compressedData = NULL;
+
 
   if (!afl->longest_input_queued) {
     printf("Longest input not set yet - bailing\n");
@@ -1370,12 +1373,16 @@ void reorder_queue_NCD(afl_state_t *afl) {
       printf("Realloc failed\n");
   }
 
-  float largestNCD = 0.0; int largestNCDindex = -1; 
+  float largestNCD = 0.0; 
+  int largestNCDindex = -1; 
   int end = afl->queued_paths - afl->current_entry < 100 ?
               afl->queued_paths :
               afl->current_entry + 100;
 
   for (int i = afl->current_entry + 1; i < end; i++) {
+    if (afl->queue_buf[i]->disabled)
+      continue;
+
     float calced = calc_NCD(afl, afl->queue_buf[afl->current_entry], afl->queue_buf[i],
                             compressedData, maxCompressedLen, uncompressedData);
 
@@ -1386,4 +1393,14 @@ void reorder_queue_NCD(afl_state_t *afl) {
       largestNCDindex = i;
     }
   }
+
+  // swap the next entry with the largest NCD one
+  if (largestNCDindex > (s32)afl->current_entry + 1) {
+    printf("Swapping %d with %d (from range %d: %d)\n", afl->current_entry + 1, largestNCDindex, afl->current_entry + 1, end);
+    struct queue_entry *temp = afl->queue_buf[afl->current_entry + 1];
+    afl->queue_buf[afl->current_entry + 1] = afl->queue_buf[largestNCDindex];
+    afl->queue_buf[largestNCDindex] = temp;
+  }
+
+  printf("took %0.2f seconds to calc NCD and swap\n", ((double)clock() - start) / CLOCKS_PER_SEC);
 }

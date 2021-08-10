@@ -75,6 +75,6 @@ ENV IS_DOCKER="1"
 COPY ./hashfuzz_test /aflPPtests
 WORKDIR /aflPPtests
 
-CMD export RUNTIME=$(( 300 )); afl-clang-fast -o test_prog driver.c triangle.c -I . && \
+CMD export RUNTIME=$(( 30 )); afl-clang-fast -o test_prog driver.c triangle.c -I . && \
     mkdir -p OUT && mkdir -p IN && echo "5 12 13" > IN/seed && timeout $RUNTIME afl-fuzz -Z -i IN -o OUT -- ./test_prog; \
-    for test in OUT/default/queue/*; do ./test_prog < $test > /dev/null; if [[ $? == 0 ]]; then echo $test; cat $test; echo ""; fi; done
+    for test in OUT/default/queue/*; do ./test_prog < $test > /dev/null; if [ $? -ne 0 ]; then echo $test; cat $test; echo ""; fi; done
