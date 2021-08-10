@@ -2174,6 +2174,9 @@ int main(int argc, char **argv_orig, char **envp) {
 
       if (unlikely(afl->old_seed_selection)) {
 
+	printf("Just about to reorder queue\n");
+	reorder_queue_NCD(afl);
+
         while (++afl->current_entry < afl->queued_paths &&
                afl->queue_buf[afl->current_entry]->disabled)
           ;

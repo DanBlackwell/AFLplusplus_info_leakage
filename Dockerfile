@@ -60,7 +60,7 @@ COPY . /AFLplusplus
 WORKDIR /AFLplusplus
 
 RUN export CC=gcc-10 && export CXX=g++-10 && make clean && \
-    make distrib && make install && make clean
+    make source-only && make install && make clean
 
 RUN sh -c 'echo set encoding=utf-8 > /root/.vimrc'
 RUN echo '. /etc/bash_completion' >> ~/.bashrc
@@ -71,3 +71,10 @@ ENV IS_DOCKER="1"
 # Disabled until we have the container ready
 #COPY --from=aflplusplus/afl-dyninst /usr/local/lib/libdyninstAPI_RT.so /usr/local/lib/libdyninstAPI_RT.so
 #COPY --from=aflplusplus/afl-dyninst /afl-dyninst/libAflDyninst.so /usr/local/lib/libAflDyninst.so
+
+COPY ./hashfuzz_test /aflPPtests
+WORKDIR /aflPPtests
+
+CMD export RUNTIME=$(( 300 )); afl-clang-fast -o test_prog driver.c triangle.c -I . && \
+    mkdir -p OUT && mkdir -p IN && echo "5 12 13" > IN/seed && timeout $RUNTIME afl-fuzz -Z -i IN -o OUT -- ./test_prog; \
+    for test in OUT/default/queue/*; do ./test_prog < $test > /dev/null; if [[ $? == 0 ]]; then echo $test; cat $test; echo ""; fi; done

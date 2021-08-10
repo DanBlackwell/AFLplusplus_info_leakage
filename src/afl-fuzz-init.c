@@ -26,6 +26,7 @@
 #include "afl-fuzz.h"
 #include <limits.h>
 #include "cmplog.h"
+#include <execinfo.h>
 
 #ifdef HAVE_AFFINITY
 
@@ -2536,6 +2537,21 @@ static void handle_skipreq(int sig) {
 
 }
 
+static void handle_seg_fault(int sig) {
+  (void)sig;
+
+  void *array[10];
+  size_t size;
+
+  // get void*'s for all entries on the stack
+  size = backtrace(array, 10);
+
+  // print out all the frames to stderr
+  fprintf(stderr, "Error: signal %d:\n", sig);
+  backtrace_symbols_fd(array, size, STDERR_FILENO);
+  exit(1);
+}
+
 /* Setup shared map for fuzzing with input via sharedmem */
 
 void setup_testcase_shmem(afl_state_t *afl) {
@@ -2900,6 +2916,11 @@ void setup_signal_handlers(void) {
   sigaction(SIGHUP, &sa, NULL);
   sigaction(SIGINT, &sa, NULL);
   sigaction(SIGTERM, &sa, NULL);
+
+  /* Handle seg fault */
+
+  sa.sa_handler = handle_seg_fault;
+  sigaction(SIGSEGV, &sa, NULL);
 
   /* Window resize */
 
