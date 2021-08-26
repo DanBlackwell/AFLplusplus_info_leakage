@@ -1,0 +1,64 @@
+        -:    0:Source:crypto/bn/bin2bn.c
+        -:    0:Graph:crypto/bn/bn_lib.gcno
+        -:    0:Data:crypto/bn/bn_lib.gcda
+        -:    0:Runs:340
+        -:    1:#ifndef __BIN2BN__
+        -:    2:#define __BIN2BN__
+        -:    3:
+        -:    4:#include <assert.h>
+        -:    5:#include <limits.h>
+        -:    6:#include "internal/cryptlib.h"
+        -:    7:#include "bn_local.h"
+        -:    8:#include <openssl/opensslconf.h>
+        -:    9:#include "internal/constant_time.h"
+        -:   10:
+      340:   11:BIGNUM *BN_bin2bn(const unsigned char *s, int len, BIGNUM *ret)
+        -:   12:{
+        -:   13:    unsigned int i, m;
+        -:   14:    unsigned int n;
+        -:   15:    BN_ULONG l;
+      340:   16:    BIGNUM *bn = NULL;
+        -:   17:    // return NULL;
+        -:   18:    // len = strlen((char *)s);
+        -:   19:
+      340:   20:    if (ret == NULL)
+      340:   21:        ret = bn = BN_new();
+      340:   22:    if (ret == NULL)
+    #####:   23:        return NULL;
+        -:   24:    bn_check_top(ret);
+        -:   25:    /* Skip leading zero's. */
+     1815:   26:    for ( ; len > 0 && *s == 0; s++, len--)
+     1475:   27:        continue;
+      340:   28:    n = len;
+      340:   29:    if (n == 0) {
+        5:   30:        ret->top = 0;
+        5:   31:        return ret;
+        -:   32:    }
+      335:   33:    i = ((n - 1) / BN_BYTES) + 1;
+      335:   34:    m = ((n - 1) % (BN_BYTES));
+      335:   35:    if (bn_wexpand(ret, (int)i) == NULL) {
+    #####:   36:        BN_free(bn);
+    #####:   37:        return NULL;
+        -:   38:    }
+      335:   39:    ret->top = i;
+      335:   40:    ret->neg = 0;
+      335:   41:    l = 0;
+  6790845:   42:    while (n--) {
+  6790510:   43:        l = (l << 8L) | *(s++);
+  6790510:   44:        if (m-- == 0) {
+   848935:   45:            ret->d[--i] = l;
+   848935:   46:            l = 0;
+   848935:   47:            m = BN_BYTES - 1;
+        -:   48:        }
+        -:   49:    }
+        -:   50:    /*
+        -:   51:     * need to call this due to clear byte at top if avoiding having the top
+        -:   52:     * bit set (-ve number)
+        -:   53:     */
+      335:   54:    bn_correct_top(ret);
+      335:   55:    return ret;
+        -:   56:}
+        -:   57:
+        -:   58:#endif // __BIN2BN__
+        -:   59:
+        -:   60:

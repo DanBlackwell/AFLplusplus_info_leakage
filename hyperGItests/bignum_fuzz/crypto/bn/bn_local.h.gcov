@@ -1,0 +1,672 @@
+        -:    0:Source:crypto/bn/bn_local.h
+        -:    0:Graph:crypto/bn/bn_lib.gcno
+        -:    0:Data:crypto/bn/bn_lib.gcda
+        -:    0:Runs:340
+        -:    1:/*
+        -:    2: * Copyright 1995-2020 The OpenSSL Project Authors. All Rights Reserved.
+        -:    3: *
+        -:    4: * Licensed under the OpenSSL license (the "License").  You may not use
+        -:    5: * this file except in compliance with the License.  You can obtain a copy
+        -:    6: * in the file LICENSE in the source distribution or at
+        -:    7: * https://www.openssl.org/source/license.html
+        -:    8: */
+        -:    9:
+        -:   10:#ifndef OSSL_CRYPTO_BN_LOCAL_H
+        -:   11:# define OSSL_CRYPTO_BN_LOCAL_H
+        -:   12:
+        -:   13:/*
+        -:   14: * The EDK2 build doesn't use bn_conf.h; it sets THIRTY_TWO_BIT or
+        -:   15: * SIXTY_FOUR_BIT in its own environment since it doesn't re-run our
+        -:   16: * Configure script and needs to support both 32-bit and 64-bit.
+        -:   17: */
+        -:   18:# include <openssl/opensslconf.h>
+        -:   19:
+        -:   20:# if !defined(OPENSSL_SYS_UEFI)
+        -:   21:#  include "crypto/bn_conf.h"
+        -:   22:# endif
+        -:   23:
+        -:   24:# include "crypto/bn.h"
+        -:   25:
+        -:   26:/*
+        -:   27: * These preprocessor symbols control various aspects of the bignum headers
+        -:   28: * and library code. They're not defined by any "normal" configuration, as
+        -:   29: * they are intended for development and testing purposes. NB: defining all
+        -:   30: * three can be useful for debugging application code as well as openssl
+        -:   31: * itself. BN_DEBUG - turn on various debugging alterations to the bignum
+        -:   32: * code BN_DEBUG_RAND - uses random poisoning of unused words to trip up
+        -:   33: * mismanagement of bignum internals. You must also define BN_DEBUG.
+        -:   34: */
+        -:   35:/* #define BN_DEBUG */
+        -:   36:/* #define BN_DEBUG_RAND */
+        -:   37:
+        -:   38:# ifndef OPENSSL_SMALL_FOOTPRINT
+        -:   39:#  define BN_MUL_COMBA
+        -:   40:#  define BN_SQR_COMBA
+        -:   41:#  define BN_RECURSION
+        -:   42:# endif
+        -:   43:
+        -:   44:/*
+        -:   45: * This next option uses the C libraries (2 word)/(1 word) function. If it is
+        -:   46: * not defined, I use my C version (which is slower). The reason for this
+        -:   47: * flag is that when the particular C compiler library routine is used, and
+        -:   48: * the library is linked with a different compiler, the library is missing.
+        -:   49: * This mostly happens when the library is built with gcc and then linked
+        -:   50: * using normal cc.  This would be a common occurrence because gcc normally
+        -:   51: * produces code that is 2 times faster than system compilers for the big
+        -:   52: * number stuff. For machines with only one compiler (or shared libraries),
+        -:   53: * this should be on.  Again this in only really a problem on machines using
+        -:   54: * "long long's", are 32bit, and are not using my assembler code.
+        -:   55: */
+        -:   56:# if defined(OPENSSL_SYS_MSDOS) || defined(OPENSSL_SYS_WINDOWS) || \
+        -:   57:    defined(OPENSSL_SYS_WIN32) || defined(linux)
+        -:   58:#  define BN_DIV2W
+        -:   59:# endif
+        -:   60:
+        -:   61:/*
+        -:   62: * 64-bit processor with LP64 ABI
+        -:   63: */
+        -:   64:# ifdef SIXTY_FOUR_BIT_LONG
+        -:   65:#  define BN_ULLONG       unsigned long long
+        -:   66:#  define BN_BITS4        32
+        -:   67:#  define BN_MASK2        (0xffffffffffffffffL)
+        -:   68:#  define BN_MASK2l       (0xffffffffL)
+        -:   69:#  define BN_MASK2h       (0xffffffff00000000L)
+        -:   70:#  define BN_MASK2h1      (0xffffffff80000000L)
+        -:   71:#  define BN_DEC_CONV     (10000000000000000000UL)
+        -:   72:#  define BN_DEC_NUM      19
+        -:   73:#  define BN_DEC_FMT1     "%lu"
+        -:   74:#  define BN_DEC_FMT2     "%019lu"
+        -:   75:# endif
+        -:   76:
+        -:   77:/*
+        -:   78: * 64-bit processor other than LP64 ABI
+        -:   79: */
+        -:   80:# ifdef SIXTY_FOUR_BIT
+        -:   81:#  undef BN_LLONG
+        -:   82:#  undef BN_ULLONG
+        -:   83:#  define BN_BITS4        32
+        -:   84:#  define BN_MASK2        (0xffffffffffffffffLL)
+        -:   85:#  define BN_MASK2l       (0xffffffffL)
+        -:   86:#  define BN_MASK2h       (0xffffffff00000000LL)
+        -:   87:#  define BN_MASK2h1      (0xffffffff80000000LL)
+        -:   88:#  define BN_DEC_CONV     (10000000000000000000ULL)
+        -:   89:#  define BN_DEC_NUM      19
+        -:   90:#  define BN_DEC_FMT1     "%llu"
+        -:   91:#  define BN_DEC_FMT2     "%019llu"
+        -:   92:# endif
+        -:   93:
+        -:   94:# ifdef THIRTY_TWO_BIT
+        -:   95:#  ifdef BN_LLONG
+        -:   96:#   if defined(_WIN32) && !defined(__GNUC__)
+        -:   97:#    define BN_ULLONG     unsigned __int64
+        -:   98:#   else
+        -:   99:#    define BN_ULLONG     unsigned long long
+        -:  100:#   endif
+        -:  101:#  endif
+        -:  102:#  define BN_BITS4        16
+        -:  103:#  define BN_MASK2        (0xffffffffL)
+        -:  104:#  define BN_MASK2l       (0xffff)
+        -:  105:#  define BN_MASK2h1      (0xffff8000L)
+        -:  106:#  define BN_MASK2h       (0xffff0000L)
+        -:  107:#  define BN_DEC_CONV     (1000000000L)
+        -:  108:#  define BN_DEC_NUM      9
+        -:  109:#  define BN_DEC_FMT1     "%u"
+        -:  110:#  define BN_DEC_FMT2     "%09u"
+        -:  111:# endif
+        -:  112:
+        -:  113:
+        -:  114:/*-
+        -:  115: * Bignum consistency macros
+        -:  116: * There is one "API" macro, bn_fix_top(), for stripping leading zeroes from
+        -:  117: * bignum data after direct manipulations on the data. There is also an
+        -:  118: * "internal" macro, bn_check_top(), for verifying that there are no leading
+        -:  119: * zeroes. Unfortunately, some auditing is required due to the fact that
+        -:  120: * bn_fix_top() has become an overabused duct-tape because bignum data is
+        -:  121: * occasionally passed around in an inconsistent state. So the following
+        -:  122: * changes have been made to sort this out;
+        -:  123: * - bn_fix_top()s implementation has been moved to bn_correct_top()
+        -:  124: * - if BN_DEBUG isn't defined, bn_fix_top() maps to bn_correct_top(), and
+        -:  125: *   bn_check_top() is as before.
+        -:  126: * - if BN_DEBUG *is* defined;
+        -:  127: *   - bn_check_top() tries to pollute unused words even if the bignum 'top' is
+        -:  128: *     consistent. (ed: only if BN_DEBUG_RAND is defined)
+        -:  129: *   - bn_fix_top() maps to bn_check_top() rather than "fixing" anything.
+        -:  130: * The idea is to have debug builds flag up inconsistent bignums when they
+        -:  131: * occur. If that occurs in a bn_fix_top(), we examine the code in question; if
+        -:  132: * the use of bn_fix_top() was appropriate (ie. it follows directly after code
+        -:  133: * that manipulates the bignum) it is converted to bn_correct_top(), and if it
+        -:  134: * was not appropriate, we convert it permanently to bn_check_top() and track
+        -:  135: * down the cause of the bug. Eventually, no internal code should be using the
+        -:  136: * bn_fix_top() macro. External applications and libraries should try this with
+        -:  137: * their own code too, both in terms of building against the openssl headers
+        -:  138: * with BN_DEBUG defined *and* linking with a version of OpenSSL built with it
+        -:  139: * defined. This not only improves external code, it provides more test
+        -:  140: * coverage for openssl's own code.
+        -:  141: */
+        -:  142:
+        -:  143:# ifdef BN_DEBUG
+        -:  144:/*
+        -:  145: * The new BN_FLG_FIXED_TOP flag marks vectors that were not treated with
+        -:  146: * bn_correct_top, in other words such vectors are permitted to have zeros
+        -:  147: * in most significant limbs. Such vectors are used internally to achieve
+        -:  148: * execution time invariance for critical operations with private keys.
+        -:  149: * It's BN_DEBUG-only flag, because user application is not supposed to
+        -:  150: * observe it anyway. Moreover, optimizing compiler would actually remove
+        -:  151: * all operations manipulating the bit in question in non-BN_DEBUG build.
+        -:  152: */
+        -:  153:#  define BN_FLG_FIXED_TOP 0x10000
+        -:  154:#  ifdef BN_DEBUG_RAND
+        -:  155:#   define bn_pollute(a) \
+        -:  156:        do { \
+        -:  157:            const BIGNUM *_bnum1 = (a); \
+        -:  158:            if (_bnum1->top < _bnum1->dmax) { \
+        -:  159:                unsigned char _tmp_char; \
+        -:  160:                /* We cast away const without the compiler knowing, any \
+        -:  161:                 * *genuinely* constant variables that aren't mutable \
+        -:  162:                 * wouldn't be constructed with top!=dmax. */ \
+        -:  163:                BN_ULONG *_not_const; \
+        -:  164:                memcpy(&_not_const, &_bnum1->d, sizeof(_not_const)); \
+        -:  165:                RAND_bytes(&_tmp_char, 1); /* Debug only - safe to ignore error return */\
+        -:  166:                memset(_not_const + _bnum1->top, _tmp_char, \
+        -:  167:                       sizeof(*_not_const) * (_bnum1->dmax - _bnum1->top)); \
+        -:  168:            } \
+        -:  169:        } while(0)
+        -:  170:#  else
+        -:  171:#   define bn_pollute(a)
+        -:  172:#  endif
+        -:  173:#  define bn_check_top(a) \
+        -:  174:        do { \
+        -:  175:                const BIGNUM *_bnum2 = (a); \
+        -:  176:                if (_bnum2 != NULL) { \
+        -:  177:                        int _top = _bnum2->top; \
+        -:  178:                        (void)ossl_assert((_top == 0 && !_bnum2->neg) || \
+        -:  179:                                  (_top && ((_bnum2->flags & BN_FLG_FIXED_TOP) \
+        -:  180:                                            || _bnum2->d[_top - 1] != 0))); \
+        -:  181:                        bn_pollute(_bnum2); \
+        -:  182:                } \
+        -:  183:        } while(0)
+        -:  184:
+        -:  185:#  define bn_fix_top(a)           bn_check_top(a)
+        -:  186:
+        -:  187:#  define bn_check_size(bn, bits) bn_wcheck_size(bn, ((bits+BN_BITS2-1))/BN_BITS2)
+        -:  188:#  define bn_wcheck_size(bn, words) \
+        -:  189:        do { \
+        -:  190:                const BIGNUM *_bnum2 = (bn); \
+        -:  191:                assert((words) <= (_bnum2)->dmax && \
+        -:  192:                       (words) >= (_bnum2)->top); \
+        -:  193:                /* avoid unused variable warning with NDEBUG */ \
+        -:  194:                (void)(_bnum2); \
+        -:  195:        } while(0)
+        -:  196:
+        -:  197:# else                          /* !BN_DEBUG */
+        -:  198:
+        -:  199:#  define BN_FLG_FIXED_TOP 0
+        -:  200:#  define bn_pollute(a)
+        -:  201:#  define bn_check_top(a)
+        -:  202:#  define bn_fix_top(a)           bn_correct_top(a)
+        -:  203:#  define bn_check_size(bn, bits)
+        -:  204:#  define bn_wcheck_size(bn, words)
+        -:  205:
+        -:  206:# endif
+        -:  207:
+        -:  208:BN_ULONG bn_mul_add_words(BN_ULONG *rp, const BN_ULONG *ap, int num,
+        -:  209:                          BN_ULONG w);
+        -:  210:BN_ULONG bn_mul_words(BN_ULONG *rp, const BN_ULONG *ap, int num, BN_ULONG w);
+        -:  211:void bn_sqr_words(BN_ULONG *rp, const BN_ULONG *ap, int num);
+        -:  212:BN_ULONG bn_div_words(BN_ULONG h, BN_ULONG l, BN_ULONG d);
+        -:  213:BN_ULONG bn_add_words(BN_ULONG *rp, const BN_ULONG *ap, const BN_ULONG *bp,
+        -:  214:                      int num);
+        -:  215:BN_ULONG bn_sub_words(BN_ULONG *rp, const BN_ULONG *ap, const BN_ULONG *bp,
+        -:  216:                      int num);
+        -:  217:
+        -:  218:struct bignum_st {
+        -:  219:    BN_ULONG *d;                /* Pointer to an array of 'BN_BITS2' bit
+        -:  220:                                 * chunks. */
+        -:  221:    int top;                    /* Index of last used d +1. */
+        -:  222:    /* The next are internal book keeping for bn_expand. */
+        -:  223:    int dmax;                   /* Size of the d array. */
+        -:  224:    int neg;                    /* one if the number is negative */
+        -:  225:    int flags;
+        -:  226:};
+        -:  227:
+        -:  228:/* Used for montgomery multiplication */
+        -:  229:struct bn_mont_ctx_st {
+        -:  230:    int ri;                     /* number of bits in R */
+        -:  231:    BIGNUM RR;                  /* used to convert to montgomery form,
+        -:  232:                                   possibly zero-padded */
+        -:  233:    BIGNUM N;                   /* The modulus */
+        -:  234:    BIGNUM Ni;                  /* R*(1/R mod N) - N*Ni = 1 (Ni is only
+        -:  235:                                 * stored for bignum algorithm) */
+        -:  236:    BN_ULONG n0[2];             /* least significant word(s) of Ni; (type
+        -:  237:                                 * changed with 0.9.9, was "BN_ULONG n0;"
+        -:  238:                                 * before) */
+        -:  239:    int flags;
+        -:  240:};
+        -:  241:
+        -:  242:/*
+        -:  243: * Used for reciprocal division/mod functions It cannot be shared between
+        -:  244: * threads
+        -:  245: */
+        -:  246:struct bn_recp_ctx_st {
+        -:  247:    BIGNUM N;                   /* the divisor */
+        -:  248:    BIGNUM Nr;                  /* the reciprocal */
+        -:  249:    int num_bits;
+        -:  250:    int shift;
+        -:  251:    int flags;
+        -:  252:};
+        -:  253:
+        -:  254:/* Used for slow "generation" functions. */
+        -:  255:struct bn_gencb_st {
+        -:  256:    unsigned int ver;           /* To handle binary (in)compatibility */
+        -:  257:    void *arg;                  /* callback-specific data */
+        -:  258:    union {
+        -:  259:        /* if (ver==1) - handles old style callbacks */
+        -:  260:        void (*cb_1) (int, int, void *);
+        -:  261:        /* if (ver==2) - new callback style */
+        -:  262:        int (*cb_2) (int, int, BN_GENCB *);
+        -:  263:    } cb;
+        -:  264:};
+        -:  265:
+        -:  266:/*-
+        -:  267: * BN_window_bits_for_exponent_size -- macro for sliding window mod_exp functions
+        -:  268: *
+        -:  269: *
+        -:  270: * For window size 'w' (w >= 2) and a random 'b' bits exponent,
+        -:  271: * the number of multiplications is a constant plus on average
+        -:  272: *
+        -:  273: *    2^(w-1) + (b-w)/(w+1);
+        -:  274: *
+        -:  275: * here  2^(w-1)  is for precomputing the table (we actually need
+        -:  276: * entries only for windows that have the lowest bit set), and
+        -:  277: * (b-w)/(w+1)  is an approximation for the expected number of
+        -:  278: * w-bit windows, not counting the first one.
+        -:  279: *
+        -:  280: * Thus we should use
+        -:  281: *
+        -:  282: *    w >= 6  if        b > 671
+        -:  283: *     w = 5  if  671 > b > 239
+        -:  284: *     w = 4  if  239 > b >  79
+        -:  285: *     w = 3  if   79 > b >  23
+        -:  286: *    w <= 2  if   23 > b
+        -:  287: *
+        -:  288: * (with draws in between).  Very small exponents are often selected
+        -:  289: * with low Hamming weight, so we use  w = 1  for b <= 23.
+        -:  290: */
+        -:  291:# define BN_window_bits_for_exponent_size(b) \
+        -:  292:                ((b) > 671 ? 6 : \
+        -:  293:                 (b) > 239 ? 5 : \
+        -:  294:                 (b) >  79 ? 4 : \
+        -:  295:                 (b) >  23 ? 3 : 1)
+        -:  296:
+        -:  297:/*
+        -:  298: * BN_mod_exp_mont_consttime is based on the assumption that the L1 data cache
+        -:  299: * line width of the target processor is at least the following value.
+        -:  300: */
+        -:  301:# define MOD_EXP_CTIME_MIN_CACHE_LINE_WIDTH      ( 64 )
+        -:  302:# define MOD_EXP_CTIME_MIN_CACHE_LINE_MASK       (MOD_EXP_CTIME_MIN_CACHE_LINE_WIDTH - 1)
+        -:  303:
+        -:  304:/*
+        -:  305: * Window sizes optimized for fixed window size modular exponentiation
+        -:  306: * algorithm (BN_mod_exp_mont_consttime). To achieve the security goals of
+        -:  307: * BN_mode_exp_mont_consttime, the maximum size of the window must not exceed
+        -:  308: * log_2(MOD_EXP_CTIME_MIN_CACHE_LINE_WIDTH). Window size thresholds are
+        -:  309: * defined for cache line sizes of 32 and 64, cache line sizes where
+        -:  310: * log_2(32)=5 and log_2(64)=6 respectively. A window size of 7 should only be
+        -:  311: * used on processors that have a 128 byte or greater cache line size.
+        -:  312: */
+        -:  313:# if MOD_EXP_CTIME_MIN_CACHE_LINE_WIDTH == 64
+        -:  314:
+        -:  315:#  define BN_window_bits_for_ctime_exponent_size(b) \
+        -:  316:                ((b) > 937 ? 6 : \
+        -:  317:                 (b) > 306 ? 5 : \
+        -:  318:                 (b) >  89 ? 4 : \
+        -:  319:                 (b) >  22 ? 3 : 1)
+        -:  320:#  define BN_MAX_WINDOW_BITS_FOR_CTIME_EXPONENT_SIZE    (6)
+        -:  321:
+        -:  322:# elif MOD_EXP_CTIME_MIN_CACHE_LINE_WIDTH == 32
+        -:  323:
+        -:  324:#  define BN_window_bits_for_ctime_exponent_size(b) \
+        -:  325:                ((b) > 306 ? 5 : \
+        -:  326:                 (b) >  89 ? 4 : \
+        -:  327:                 (b) >  22 ? 3 : 1)
+        -:  328:#  define BN_MAX_WINDOW_BITS_FOR_CTIME_EXPONENT_SIZE    (5)
+        -:  329:
+        -:  330:# endif
+        -:  331:
+        -:  332:/* Pentium pro 16,16,16,32,64 */
+        -:  333:/* Alpha       16,16,16,16.64 */
+        -:  334:# define BN_MULL_SIZE_NORMAL                     (16)/* 32 */
+        -:  335:# define BN_MUL_RECURSIVE_SIZE_NORMAL            (16)/* 32 less than */
+        -:  336:# define BN_SQR_RECURSIVE_SIZE_NORMAL            (16)/* 32 */
+        -:  337:# define BN_MUL_LOW_RECURSIVE_SIZE_NORMAL        (32)/* 32 */
+        -:  338:# define BN_MONT_CTX_SET_SIZE_WORD               (64)/* 32 */
+        -:  339:
+        -:  340:/*
+        -:  341: * 2011-02-22 SMS. In various places, a size_t variable or a type cast to
+        -:  342: * size_t was used to perform integer-only operations on pointers.  This
+        -:  343: * failed on VMS with 64-bit pointers (CC /POINTER_SIZE = 64) because size_t
+        -:  344: * is still only 32 bits.  What's needed in these cases is an integer type
+        -:  345: * with the same size as a pointer, which size_t is not certain to be. The
+        -:  346: * only fix here is VMS-specific.
+        -:  347: */
+        -:  348:# if defined(OPENSSL_SYS_VMS)
+        -:  349:#  if __INITIAL_POINTER_SIZE == 64
+        -:  350:#   define PTR_SIZE_INT long long
+        -:  351:#  else                         /* __INITIAL_POINTER_SIZE == 64 */
+        -:  352:#   define PTR_SIZE_INT int
+        -:  353:#  endif                        /* __INITIAL_POINTER_SIZE == 64 [else] */
+        -:  354:# elif !defined(PTR_SIZE_INT)   /* defined(OPENSSL_SYS_VMS) */
+        -:  355:#  define PTR_SIZE_INT size_t
+        -:  356:# endif                         /* defined(OPENSSL_SYS_VMS) [else] */
+        -:  357:
+        -:  358:# if !defined(OPENSSL_NO_ASM) && !defined(OPENSSL_NO_INLINE_ASM) && !defined(PEDANTIC)
+        -:  359:/*
+        -:  360: * BN_UMULT_HIGH section.
+        -:  361: * If the compiler doesn't support 2*N integer type, then you have to
+        -:  362: * replace every N*N multiplication with 4 (N/2)*(N/2) accompanied by some
+        -:  363: * shifts and additions which unavoidably results in severe performance
+        -:  364: * penalties. Of course provided that the hardware is capable of producing
+        -:  365: * 2*N result... That's when you normally start considering assembler
+        -:  366: * implementation. However! It should be pointed out that some CPUs (e.g.,
+        -:  367: * PowerPC, Alpha, and IA-64) provide *separate* instruction calculating
+        -:  368: * the upper half of the product placing the result into a general
+        -:  369: * purpose register. Now *if* the compiler supports inline assembler,
+        -:  370: * then it's not impossible to implement the "bignum" routines (and have
+        -:  371: * the compiler optimize 'em) exhibiting "native" performance in C. That's
+        -:  372: * what BN_UMULT_HIGH macro is about:-) Note that more recent compilers do
+        -:  373: * support 2*64 integer type, which is also used here.
+        -:  374: */
+        -:  375:#  if defined(__SIZEOF_INT128__) && __SIZEOF_INT128__==16 && \
+        -:  376:      (defined(SIXTY_FOUR_BIT) || defined(SIXTY_FOUR_BIT_LONG))
+        -:  377:#   define BN_UMULT_HIGH(a,b)          (((__uint128_t)(a)*(b))>>64)
+        -:  378:#   define BN_UMULT_LOHI(low,high,a,b) ({       \
+        -:  379:        __uint128_t ret=(__uint128_t)(a)*(b);   \
+        -:  380:        (high)=ret>>64; (low)=ret;      })
+        -:  381:#  elif defined(__alpha) && (defined(SIXTY_FOUR_BIT_LONG) || defined(SIXTY_FOUR_BIT))
+        -:  382:#   if defined(__DECC)
+        -:  383:#    include <c_asm.h>
+        -:  384:#    define BN_UMULT_HIGH(a,b)   (BN_ULONG)asm("umulh %a0,%a1,%v0",(a),(b))
+        -:  385:#   elif defined(__GNUC__) && __GNUC__>=2
+        -:  386:#    define BN_UMULT_HIGH(a,b)   ({     \
+        -:  387:        register BN_ULONG ret;          \
+        -:  388:        asm ("umulh     %1,%2,%0"       \
+        -:  389:             : "=r"(ret)                \
+        -:  390:             : "r"(a), "r"(b));         \
+        -:  391:        ret;                      })
+        -:  392:#   endif                       /* compiler */
+        -:  393:#  elif defined(_ARCH_PPC64) && defined(SIXTY_FOUR_BIT_LONG)
+        -:  394:#   if defined(__GNUC__) && __GNUC__>=2
+        -:  395:#    define BN_UMULT_HIGH(a,b)   ({     \
+        -:  396:        register BN_ULONG ret;          \
+        -:  397:        asm ("mulhdu    %0,%1,%2"       \
+        -:  398:             : "=r"(ret)                \
+        -:  399:             : "r"(a), "r"(b));         \
+        -:  400:        ret;                      })
+        -:  401:#   endif                       /* compiler */
+        -:  402:#  elif (defined(__x86_64) || defined(__x86_64__)) && \
+        -:  403:       (defined(SIXTY_FOUR_BIT_LONG) || defined(SIXTY_FOUR_BIT))
+        -:  404:#   if defined(__GNUC__) && __GNUC__>=2
+        -:  405:#    define BN_UMULT_HIGH(a,b)   ({     \
+        -:  406:        register BN_ULONG ret,discard;  \
+        -:  407:        asm ("mulq      %3"             \
+        -:  408:             : "=a"(discard),"=d"(ret)  \
+        -:  409:             : "a"(a), "g"(b)           \
+        -:  410:             : "cc");                   \
+        -:  411:        ret;                      })
+        -:  412:#    define BN_UMULT_LOHI(low,high,a,b) \
+        -:  413:        asm ("mulq      %3"             \
+        -:  414:                : "=a"(low),"=d"(high)  \
+        -:  415:                : "a"(a),"g"(b)         \
+        -:  416:                : "cc");
+        -:  417:#   endif
+        -:  418:#  elif (defined(_M_AMD64) || defined(_M_X64)) && defined(SIXTY_FOUR_BIT)
+        -:  419:#   if defined(_MSC_VER) && _MSC_VER>=1400
+        -:  420:unsigned __int64 __umulh(unsigned __int64 a, unsigned __int64 b);
+        -:  421:unsigned __int64 _umul128(unsigned __int64 a, unsigned __int64 b,
+        -:  422:                          unsigned __int64 *h);
+        -:  423:#    pragma intrinsic(__umulh,_umul128)
+        -:  424:#    define BN_UMULT_HIGH(a,b)           __umulh((a),(b))
+        -:  425:#    define BN_UMULT_LOHI(low,high,a,b)  ((low)=_umul128((a),(b),&(high)))
+        -:  426:#   endif
+        -:  427:#  elif defined(__mips) && (defined(SIXTY_FOUR_BIT) || defined(SIXTY_FOUR_BIT_LONG))
+        -:  428:#   if defined(__GNUC__) && __GNUC__>=2
+        -:  429:#    define BN_UMULT_HIGH(a,b) ({       \
+        -:  430:        register BN_ULONG ret;          \
+        -:  431:        asm ("dmultu    %1,%2"          \
+        -:  432:             : "=h"(ret)                \
+        -:  433:             : "r"(a), "r"(b) : "l");   \
+        -:  434:        ret;                    })
+        -:  435:#    define BN_UMULT_LOHI(low,high,a,b) \
+        -:  436:        asm ("dmultu    %2,%3"          \
+        -:  437:             : "=l"(low),"=h"(high)     \
+        -:  438:             : "r"(a), "r"(b));
+        -:  439:#   endif
+        -:  440:#  elif defined(__aarch64__) && defined(SIXTY_FOUR_BIT_LONG)
+        -:  441:#   if defined(__GNUC__) && __GNUC__>=2
+        -:  442:#    define BN_UMULT_HIGH(a,b)   ({     \
+        -:  443:        register BN_ULONG ret;          \
+        -:  444:        asm ("umulh     %0,%1,%2"       \
+        -:  445:             : "=r"(ret)                \
+        -:  446:             : "r"(a), "r"(b));         \
+        -:  447:        ret;                      })
+        -:  448:#   endif
+        -:  449:#  endif                        /* cpu */
+        -:  450:# endif                         /* OPENSSL_NO_ASM */
+        -:  451:
+        -:  452:# ifdef BN_DEBUG_RAND
+        -:  453:#  define bn_clear_top2max(a) \
+        -:  454:        { \
+        -:  455:        int      ind = (a)->dmax - (a)->top; \
+        -:  456:        BN_ULONG *ftl = &(a)->d[(a)->top-1]; \
+        -:  457:        for (; ind != 0; ind--) \
+        -:  458:                *(++ftl) = 0x0; \
+        -:  459:        }
+        -:  460:# else
+        -:  461:#  define bn_clear_top2max(a)
+        -:  462:# endif
+        -:  463:
+        -:  464:# ifdef BN_LLONG
+        -:  465:/*******************************************************************
+        -:  466: * Using the long long type, has to be twice as wide as BN_ULONG...
+        -:  467: */
+        -:  468:#  define Lw(t)    (((BN_ULONG)(t))&BN_MASK2)
+        -:  469:#  define Hw(t)    (((BN_ULONG)((t)>>BN_BITS2))&BN_MASK2)
+        -:  470:
+        -:  471:#  define mul_add(r,a,w,c) { \
+        -:  472:        BN_ULLONG t; \
+        -:  473:        t=(BN_ULLONG)w * (a) + (r) + (c); \
+        -:  474:        (r)= Lw(t); \
+        -:  475:        (c)= Hw(t); \
+        -:  476:        }
+        -:  477:
+        -:  478:#  define mul(r,a,w,c) { \
+        -:  479:        BN_ULLONG t; \
+        -:  480:        t=(BN_ULLONG)w * (a) + (c); \
+        -:  481:        (r)= Lw(t); \
+        -:  482:        (c)= Hw(t); \
+        -:  483:        }
+        -:  484:
+        -:  485:#  define sqr(r0,r1,a) { \
+        -:  486:        BN_ULLONG t; \
+        -:  487:        t=(BN_ULLONG)(a)*(a); \
+        -:  488:        (r0)=Lw(t); \
+        -:  489:        (r1)=Hw(t); \
+        -:  490:        }
+        -:  491:
+        -:  492:# elif defined(BN_UMULT_LOHI)
+        -:  493:#  define mul_add(r,a,w,c) {              \
+        -:  494:        BN_ULONG high,low,ret,tmp=(a);  \
+        -:  495:        ret =  (r);                     \
+        -:  496:        BN_UMULT_LOHI(low,high,w,tmp);  \
+        -:  497:        ret += (c);                     \
+        -:  498:        (c) =  (ret<(c))?1:0;           \
+        -:  499:        (c) += high;                    \
+        -:  500:        ret += low;                     \
+        -:  501:        (c) += (ret<low)?1:0;           \
+        -:  502:        (r) =  ret;                     \
+        -:  503:        }
+        -:  504:
+        -:  505:#  define mul(r,a,w,c)    {               \
+        -:  506:        BN_ULONG high,low,ret,ta=(a);   \
+        -:  507:        BN_UMULT_LOHI(low,high,w,ta);   \
+        -:  508:        ret =  low + (c);               \
+        -:  509:        (c) =  high;                    \
+        -:  510:        (c) += (ret<low)?1:0;           \
+        -:  511:        (r) =  ret;                     \
+        -:  512:        }
+        -:  513:
+        -:  514:#  define sqr(r0,r1,a)    {               \
+        -:  515:        BN_ULONG tmp=(a);               \
+        -:  516:        BN_UMULT_LOHI(r0,r1,tmp,tmp);   \
+        -:  517:        }
+        -:  518:
+        -:  519:# elif defined(BN_UMULT_HIGH)
+        -:  520:#  define mul_add(r,a,w,c) {              \
+        -:  521:        BN_ULONG high,low,ret,tmp=(a);  \
+        -:  522:        ret =  (r);                     \
+        -:  523:        high=  BN_UMULT_HIGH(w,tmp);    \
+        -:  524:        ret += (c);                     \
+        -:  525:        low =  (w) * tmp;               \
+        -:  526:        (c) =  (ret<(c))?1:0;           \
+        -:  527:        (c) += high;                    \
+        -:  528:        ret += low;                     \
+        -:  529:        (c) += (ret<low)?1:0;           \
+        -:  530:        (r) =  ret;                     \
+        -:  531:        }
+        -:  532:
+        -:  533:#  define mul(r,a,w,c)    {               \
+        -:  534:        BN_ULONG high,low,ret,ta=(a);   \
+        -:  535:        low =  (w) * ta;                \
+        -:  536:        high=  BN_UMULT_HIGH(w,ta);     \
+        -:  537:        ret =  low + (c);               \
+        -:  538:        (c) =  high;                    \
+        -:  539:        (c) += (ret<low)?1:0;           \
+        -:  540:        (r) =  ret;                     \
+        -:  541:        }
+        -:  542:
+        -:  543:#  define sqr(r0,r1,a)    {               \
+        -:  544:        BN_ULONG tmp=(a);               \
+        -:  545:        (r0) = tmp * tmp;               \
+        -:  546:        (r1) = BN_UMULT_HIGH(tmp,tmp);  \
+        -:  547:        }
+        -:  548:
+        -:  549:# else
+        -:  550:/*************************************************************
+        -:  551: * No long long type
+        -:  552: */
+        -:  553:
+        -:  554:#  define LBITS(a)        ((a)&BN_MASK2l)
+        -:  555:#  define HBITS(a)        (((a)>>BN_BITS4)&BN_MASK2l)
+        -:  556:#  define L2HBITS(a)      (((a)<<BN_BITS4)&BN_MASK2)
+        -:  557:
+        -:  558:#  define LLBITS(a)       ((a)&BN_MASKl)
+        -:  559:#  define LHBITS(a)       (((a)>>BN_BITS2)&BN_MASKl)
+        -:  560:#  define LL2HBITS(a)     ((BN_ULLONG)((a)&BN_MASKl)<<BN_BITS2)
+        -:  561:
+        -:  562:#  define mul64(l,h,bl,bh) \
+        -:  563:        { \
+        -:  564:        BN_ULONG m,m1,lt,ht; \
+        -:  565: \
+        -:  566:        lt=l; \
+        -:  567:        ht=h; \
+        -:  568:        m =(bh)*(lt); \
+        -:  569:        lt=(bl)*(lt); \
+        -:  570:        m1=(bl)*(ht); \
+        -:  571:        ht =(bh)*(ht); \
+        -:  572:        m=(m+m1)&BN_MASK2; if (m < m1) ht+=L2HBITS((BN_ULONG)1); \
+        -:  573:        ht+=HBITS(m); \
+        -:  574:        m1=L2HBITS(m); \
+        -:  575:        lt=(lt+m1)&BN_MASK2; if (lt < m1) ht++; \
+        -:  576:        (l)=lt; \
+        -:  577:        (h)=ht; \
+        -:  578:        }
+        -:  579:
+        -:  580:#  define sqr64(lo,ho,in) \
+        -:  581:        { \
+        -:  582:        BN_ULONG l,h,m; \
+        -:  583: \
+        -:  584:        h=(in); \
+        -:  585:        l=LBITS(h); \
+        -:  586:        h=HBITS(h); \
+        -:  587:        m =(l)*(h); \
+        -:  588:        l*=l; \
+        -:  589:        h*=h; \
+        -:  590:        h+=(m&BN_MASK2h1)>>(BN_BITS4-1); \
+        -:  591:        m =(m&BN_MASK2l)<<(BN_BITS4+1); \
+        -:  592:        l=(l+m)&BN_MASK2; if (l < m) h++; \
+        -:  593:        (lo)=l; \
+        -:  594:        (ho)=h; \
+        -:  595:        }
+        -:  596:
+        -:  597:#  define mul_add(r,a,bl,bh,c) { \
+        -:  598:        BN_ULONG l,h; \
+        -:  599: \
+        -:  600:        h= (a); \
+        -:  601:        l=LBITS(h); \
+        -:  602:        h=HBITS(h); \
+        -:  603:        mul64(l,h,(bl),(bh)); \
+        -:  604: \
+        -:  605:        /* non-multiply part */ \
+        -:  606:        l=(l+(c))&BN_MASK2; if (l < (c)) h++; \
+        -:  607:        (c)=(r); \
+        -:  608:        l=(l+(c))&BN_MASK2; if (l < (c)) h++; \
+        -:  609:        (c)=h&BN_MASK2; \
+        -:  610:        (r)=l; \
+        -:  611:        }
+        -:  612:
+        -:  613:#  define mul(r,a,bl,bh,c) { \
+        -:  614:        BN_ULONG l,h; \
+        -:  615: \
+        -:  616:        h= (a); \
+        -:  617:        l=LBITS(h); \
+        -:  618:        h=HBITS(h); \
+        -:  619:        mul64(l,h,(bl),(bh)); \
+        -:  620: \
+        -:  621:        /* non-multiply part */ \
+        -:  622:        l+=(c); if ((l&BN_MASK2) < (c)) h++; \
+        -:  623:        (c)=h&BN_MASK2; \
+        -:  624:        (r)=l&BN_MASK2; \
+        -:  625:        }
+        -:  626:# endif                         /* !BN_LLONG */
+        -:  627:
+        -:  628:void BN_RECP_CTX_init(BN_RECP_CTX *recp);
+        -:  629:void BN_MONT_CTX_init(BN_MONT_CTX *ctx);
+        -:  630:
+        -:  631:void bn_init(BIGNUM *a);
+        -:  632:void bn_mul_normal(BN_ULONG *r, BN_ULONG *a, int na, BN_ULONG *b, int nb);
+        -:  633:void bn_mul_comba8(BN_ULONG *r, BN_ULONG *a, BN_ULONG *b);
+        -:  634:void bn_mul_comba4(BN_ULONG *r, BN_ULONG *a, BN_ULONG *b);
+        -:  635:void bn_sqr_normal(BN_ULONG *r, const BN_ULONG *a, int n, BN_ULONG *tmp);
+        -:  636:void bn_sqr_comba8(BN_ULONG *r, const BN_ULONG *a);
+        -:  637:void bn_sqr_comba4(BN_ULONG *r, const BN_ULONG *a);
+        -:  638:int bn_cmp_words(const BN_ULONG *a, const BN_ULONG *b, int n);
+        -:  639:int bn_cmp_part_words(const BN_ULONG *a, const BN_ULONG *b, int cl, int dl);
+        -:  640:void bn_mul_recursive(BN_ULONG *r, BN_ULONG *a, BN_ULONG *b, int n2,
+        -:  641:                      int dna, int dnb, BN_ULONG *t);
+        -:  642:void bn_mul_part_recursive(BN_ULONG *r, BN_ULONG *a, BN_ULONG *b,
+        -:  643:                           int n, int tna, int tnb, BN_ULONG *t);
+        -:  644:void bn_sqr_recursive(BN_ULONG *r, const BN_ULONG *a, int n2, BN_ULONG *t);
+        -:  645:void bn_mul_low_normal(BN_ULONG *r, BN_ULONG *a, BN_ULONG *b, int n);
+        -:  646:void bn_mul_low_recursive(BN_ULONG *r, BN_ULONG *a, BN_ULONG *b, int n2,
+        -:  647:                          BN_ULONG *t);
+        -:  648:BN_ULONG bn_sub_part_words(BN_ULONG *r, const BN_ULONG *a, const BN_ULONG *b,
+        -:  649:                           int cl, int dl);
+        -:  650:int bn_mul_mont(BN_ULONG *rp, const BN_ULONG *ap, const BN_ULONG *bp,
+        -:  651:                const BN_ULONG *np, const BN_ULONG *n0, int num);
+        -:  652:
+        -:  653:BIGNUM *int_bn_mod_inverse(BIGNUM *in,
+        -:  654:                           const BIGNUM *a, const BIGNUM *n, BN_CTX *ctx,
+        -:  655:                           int *noinv);
+        -:  656:
+    #####:  657:static ossl_inline BIGNUM *bn_expand(BIGNUM *a, int bits)
+        -:  658:{
+    #####:  659:    if (bits > (INT_MAX - BN_BITS2 + 1))
+    #####:  660:        return NULL;
+        -:  661:
+    #####:  662:    if (((bits+BN_BITS2-1)/BN_BITS2) <= (a)->dmax)
+    #####:  663:        return a;
+        -:  664:
+    #####:  665:    return bn_expand2((a),(bits+BN_BITS2-1)/BN_BITS2);
+        -:  666:}
+        -:  667:
+        -:  668:#endif

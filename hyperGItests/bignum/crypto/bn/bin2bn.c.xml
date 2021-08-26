@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<unit xmlns="http://www.srcML.org/srcML/src" xmlns:cpp="http://www.srcML.org/srcML/cpp" revision="0.9.5" language="C" filename="bin2bn.c"><cpp:ifndef>#<cpp:directive>ifndef</cpp:directive> <name>__BIN2BN__</name></cpp:ifndef>
+<cpp:define>#<cpp:directive>define</cpp:directive> <cpp:macro><name>__BIN2BN__</name></cpp:macro></cpp:define>
+
+<cpp:include>#<cpp:directive>include</cpp:directive> <cpp:file>&lt;assert.h&gt;</cpp:file></cpp:include>
+<cpp:include>#<cpp:directive>include</cpp:directive> <cpp:file>&lt;limits.h&gt;</cpp:file></cpp:include>
+<cpp:include>#<cpp:directive>include</cpp:directive> <cpp:file>"internal/cryptlib.h"</cpp:file></cpp:include>
+<cpp:include>#<cpp:directive>include</cpp:directive> <cpp:file>"bn_local.h"</cpp:file></cpp:include>
+<cpp:include>#<cpp:directive>include</cpp:directive> <cpp:file>&lt;openssl/opensslconf.h&gt;</cpp:file></cpp:include>
+<cpp:include>#<cpp:directive>include</cpp:directive> <cpp:file>"internal/constant_time.h"</cpp:file></cpp:include>
+
+<function><type><name>BIGNUM</name> <modifier>*</modifier></type><name>BN_bin2bn</name><parameter_list>(<parameter><decl><type><specifier>const</specifier> <name>unsigned</name> <name>char</name> <modifier>*</modifier></type><name>s</name></decl></parameter>, <parameter><decl><type><name>int</name></type> <name>len</name></decl></parameter>, <parameter><decl><type><name>BIGNUM</name> <modifier>*</modifier></type><name>ret</name></decl></parameter>)</parameter_list>
+<block>{
+    <decl_stmt><decl><type><name>unsigned</name> <name>int</name></type> <name>i</name></decl>, <decl><type ref="prev"/><name>m</name></decl>;</decl_stmt>
+    <decl_stmt><decl><type><name>unsigned</name> <name>int</name></type> <name>n</name></decl>;</decl_stmt>
+    <decl_stmt><decl><type><name>BN_ULONG</name></type> <name>l</name></decl>;</decl_stmt>
+    <decl_stmt><decl><type><name>BIGNUM</name> <modifier>*</modifier></type><name>bn</name> <init>= <expr><name>NULL</name></expr></init></decl>;</decl_stmt>
+
+    <if>if <condition>(<expr><name>ret</name> <operator>==</operator> <name>NULL</name></expr>)</condition><then>
+        <block type="pseudo"><expr_stmt><expr><name>ret</name> <operator>=</operator> <name>bn</name> <operator>=</operator> <call><name>BN_new</name><argument_list>()</argument_list></call></expr>;</expr_stmt></block></then></if>
+    <if>if <condition>(<expr><name>ret</name> <operator>==</operator> <name>NULL</name></expr>)</condition><then>
+        <block type="pseudo"><return>return <expr><name>NULL</name></expr>;</return></block></then></if>
+    <expr_stmt><expr><call><name>bn_check_top</name><argument_list>(<argument><expr><name>ret</name></expr></argument>)</argument_list></call></expr>;</expr_stmt>
+    <comment type="block">/* Skip leading zero's. */</comment>
+    <for>for <control>( <init>;</init> <condition><expr><name>len</name> <operator>&gt;</operator> <literal type="number">0</literal> <operator>&amp;&amp;</operator> <operator>*</operator><name>s</name> <operator>==</operator> <literal type="number">0</literal></expr>;</condition> <incr><expr><name>s</name><operator>++</operator></expr><operator>,</operator> <expr><name>len</name><operator>--</operator></expr></incr>)</control>
+        <block type="pseudo"><continue>continue;</continue></block></for>
+    <expr_stmt><expr><name>n</name> <operator>=</operator> <name>len</name></expr>;</expr_stmt>
+    <if>if <condition>(<expr><name>n</name> <operator>==</operator> <literal type="number">0</literal></expr>)</condition><then> <block>{
+        <expr_stmt><expr><name><name>ret</name><operator>-&gt;</operator><name>top</name></name> <operator>=</operator> <literal type="number">0</literal></expr>;</expr_stmt>
+        <return>return <expr><name>ret</name></expr>;</return>
+    }</block></then></if>
+    <expr_stmt><expr><name>i</name> <operator>=</operator> <operator>(</operator><operator>(</operator><name>n</name> <operator>-</operator> <literal type="number">1</literal><operator>)</operator> <operator>/</operator> <name>BN_BYTES</name><operator>)</operator> <operator>+</operator> <literal type="number">1</literal></expr>;</expr_stmt>
+    <expr_stmt><expr><name>m</name> <operator>=</operator> <operator>(</operator><operator>(</operator><name>n</name> <operator>-</operator> <literal type="number">1</literal><operator>)</operator> <operator>%</operator> <operator>(</operator><name>BN_BYTES</name><operator>)</operator><operator>)</operator></expr>;</expr_stmt>
+    <if>if <condition>(<expr><call><name>bn_wexpand</name><argument_list>(<argument><expr><name>ret</name></expr></argument>, <argument><expr><operator>(</operator><name>int</name><operator>)</operator><name>i</name></expr></argument>)</argument_list></call> <operator>==</operator> <name>NULL</name></expr>)</condition><then> <block>{
+        <expr_stmt><expr><call><name>BN_free</name><argument_list>(<argument><expr><name>bn</name></expr></argument>)</argument_list></call></expr>;</expr_stmt>
+        <return>return <expr><name>NULL</name></expr>;</return>
+    }</block></then></if>
+    <expr_stmt><expr><name><name>ret</name><operator>-&gt;</operator><name>top</name></name> <operator>=</operator> <name>i</name></expr>;</expr_stmt>
+    <expr_stmt><expr><name><name>ret</name><operator>-&gt;</operator><name>neg</name></name> <operator>=</operator> <literal type="number">0</literal></expr>;</expr_stmt>
+    <expr_stmt><expr><name>l</name> <operator>=</operator> <literal type="number">0</literal></expr>;</expr_stmt>
+    <while>while <condition>(<expr><name>n</name><operator>--</operator></expr>)</condition> <block>{
+        <expr_stmt><expr><name>l</name> <operator>=</operator> <operator>(</operator><name>l</name> <operator>&lt;&lt;</operator> <literal type="number">8L</literal><operator>)</operator> <operator>|</operator> <operator>*</operator><operator>(</operator><name>s</name><operator>++</operator><operator>)</operator></expr>;</expr_stmt>
+        <if>if <condition>(<expr><name>m</name><operator>--</operator> <operator>==</operator> <literal type="number">0</literal></expr>)</condition><then> <block>{
+            <expr_stmt><expr><name><name>ret</name><operator>-&gt;</operator><name>d</name><index>[<expr><operator>--</operator><name>i</name></expr>]</index></name> <operator>=</operator> <name>l</name></expr>;</expr_stmt>
+            <expr_stmt><expr><name>l</name> <operator>=</operator> <literal type="number">0</literal></expr>;</expr_stmt>
+            <expr_stmt><expr><name>m</name> <operator>=</operator> <name>BN_BYTES</name> <operator>-</operator> <literal type="number">1</literal></expr>;</expr_stmt>
+        }</block></then></if>
+    }</block></while>
+    <comment type="block">/*
+     * need to call this due to clear byte at top if avoiding having the top
+     * bit set (-ve number)
+     */</comment>
+    <expr_stmt><expr><call><name>bn_correct_top</name><argument_list>(<argument><expr><name>ret</name></expr></argument>)</argument_list></call></expr>;</expr_stmt>
+    <return>return <expr><name>ret</name></expr>;</return>
+}</block></function>
+
+<cpp:endif>#<cpp:directive>endif</cpp:directive></cpp:endif> <comment type="line">// __BIN2BN__</comment>
+</unit>
+

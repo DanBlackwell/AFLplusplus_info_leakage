@@ -1,0 +1,41 @@
+INFO: Seed: 868504893
+INFO: Loaded 1 modules   (6 inline 8-bit counters): 6 [0x82fd10, 0x82fd16), 
+INFO: Loaded 1 PC tables (6 PCs): 6 [0x7868b0,0x786910), 
+INFO:        5 files found in input/LC75
+INFO: -max_len is not provided; libFuzzer will not generate inputs larger than 4096 bytes
+INFO: seed corpus: files: 5 min: 16b max: 16b total: 80b rss: 27Mb
+#6	INITED cov: 2 ft: 2 corp: 1/16b exec/s: 0 rss: 27Mb
+#12	REDUCE cov: 2 ft: 2 corp: 1/10b lim: 16 exec/s: 0 rss: 28Mb L: 10/10 MS: 1 EraseBytes-
+#20	REDUCE cov: 2 ft: 2 corp: 1/8b lim: 16 exec/s: 0 rss: 28Mb L: 8/8 MS: 3 InsertRepeatedBytes-ChangeASCIIInt-EraseBytes-
+#39	REDUCE cov: 2 ft: 2 corp: 1/4b lim: 16 exec/s: 0 rss: 28Mb L: 4/4 MS: 4 CrossOver-ChangeBinInt-CopyPart-CrossOver-
+#63	REDUCE cov: 2 ft: 2 corp: 1/2b lim: 16 exec/s: 0 rss: 28Mb L: 2/2 MS: 4 InsertRepeatedBytes-InsertRepeatedBytes-ChangeBinInt-CrossOver-
+#130	REDUCE cov: 2 ft: 2 corp: 1/1b lim: 16 exec/s: 0 rss: 28Mb L: 1/1 MS: 2 ChangeBit-EraseBytes-
+#547	REDUCE cov: 5 ft: 5 corp: 2/21b lim: 20 exec/s: 0 rss: 28Mb L: 20/20 MS: 1 CrossOver-
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+==12603==ERROR: AddressSanitizer: SEGV on unknown address 0x603000010000 (pc 0x00000054e65a bp 0x7ffe0bd3bfb0 sp 0x7ffe0bd3bf60 T0)
+==12603==The signal is caused by a READ memory access.
+    #0 0x54e65a in BN_bin2bn /home/imesecan/github/confApr/fuzzers/bignum/crypto/bn/bin2bn.c:43:25
+    #1 0x54e46a in LLVMFuzzerTestOneInput /home/imesecan/github/confApr/fuzzers/bignum/test/bnlib_driver.c:48:17
+    #2 0x458e61 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/home/imesecan/github/confApr/fuzzers/bignum/test/bnlib_driver+0x458e61)
+    #3 0x4585a5 in fuzzer::Fuzzer::RunOne(unsigned char const*, unsigned long, bool, fuzzer::InputInfo*, bool*) (/home/imesecan/github/confApr/fuzzers/bignum/test/bnlib_driver+0x4585a5)
+    #4 0x45a847 in fuzzer::Fuzzer::MutateAndTestOne() (/home/imesecan/github/confApr/fuzzers/bignum/test/bnlib_driver+0x45a847)
+    #5 0x45b545 in fuzzer::Fuzzer::Loop(std::__Fuzzer::vector<fuzzer::SizedFile, fuzzer::fuzzer_allocator<fuzzer::SizedFile> >&) (/home/imesecan/github/confApr/fuzzers/bignum/test/bnlib_driver+0x45b545)
+    #6 0x449efe in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/home/imesecan/github/confApr/fuzzers/bignum/test/bnlib_driver+0x449efe)
+    #7 0x472d42 in main (/home/imesecan/github/confApr/fuzzers/bignum/test/bnlib_driver+0x472d42)
+    #8 0x7fecd93670b2 in __libc_start_main /build/glibc-eX1tMB/glibc-2.31/csu/../csu/libc-start.c:308:16
+    #9 0x41ec9d in _start (/home/imesecan/github/confApr/fuzzers/bignum/test/bnlib_driver+0x41ec9d)
+
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: SEGV /home/imesecan/github/confApr/fuzzers/bignum/crypto/bn/bin2bn.c:43:25 in BN_bin2bn
+==12603==ABORTING
+MS: 1 ChangeBit-; base unit: d83a1b25d2ea613868f7bd1d0a8ae333ef976841
+0x0,0x0,0x0,0x0,0xfe,0x0,0x0,0x0,0x0,0x0,0xfe,0x0,0x12,0xfe,0xfe,0xfe,0x0,0x0,0x0,0x4,
+\x00\x00\x00\x00\xfe\x00\x00\x00\x00\x00\xfe\x00\x12\xfe\xfe\xfe\x00\x00\x00\x04
+artifact_prefix='./'; Test unit written to ./crash-aa2c379377aeb8427b23d34338bf7ee5f6d43fdb
+Base64: AAAAAP4AAAAAAP4AEv7+/gAAAAQ=
+stat::number_of_executed_units: 598
+stat::average_exec_per_sec:     0
+stat::new_units_added:          6
+stat::slowest_unit_time_sec:    0
+stat::peak_rss_mb:              30

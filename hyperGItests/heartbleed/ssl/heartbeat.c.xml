@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<unit xmlns="http://www.srcML.org/srcML/src" xmlns:cpp="http://www.srcML.org/srcML/cpp" revision="0.9.5" language="C" filename="heartbeat.c"><cpp:ifndef>#<cpp:directive>ifndef</cpp:directive> <name>_HEARTBEAT</name></cpp:ifndef>
+<cpp:define>#<cpp:directive>define</cpp:directive> <cpp:macro><name>_HEARTBEAT</name></cpp:macro></cpp:define>
+
+<cpp:include>#<cpp:directive>include</cpp:directive> <cpp:file>&lt;limits.h&gt;</cpp:file></cpp:include>
+<cpp:include>#<cpp:directive>include</cpp:directive> <cpp:file>&lt;stdio.h&gt;</cpp:file></cpp:include>
+<cpp:include>#<cpp:directive>include</cpp:directive> <cpp:file>&lt;string.h&gt;</cpp:file></cpp:include>
+<cpp:include>#<cpp:directive>include</cpp:directive> <cpp:file>"ssl_locl.h"</cpp:file></cpp:include>
+<cpp:include>#<cpp:directive>include</cpp:directive> <cpp:file>&lt;openssl/buffer.h&gt;</cpp:file></cpp:include>
+<cpp:include>#<cpp:directive>include</cpp:directive> <cpp:file>&lt;openssl/rand.h&gt;</cpp:file></cpp:include>
+<cpp:include>#<cpp:directive>include</cpp:directive> <cpp:file>&lt;openssl/objects.h&gt;</cpp:file></cpp:include>
+<cpp:include>#<cpp:directive>include</cpp:directive> <cpp:file>&lt;openssl/evp.h&gt;</cpp:file></cpp:include>
+<cpp:include>#<cpp:directive>include</cpp:directive> <cpp:file>&lt;openssl/x509.h&gt;</cpp:file></cpp:include>
+
+<function><type><name>int</name></type> <name>dtls1_process_heartbeat</name><parameter_list>(<parameter><decl><type><name>SSL</name> <modifier>*</modifier></type><name>s</name></decl></parameter>)</parameter_list>
+<block>{
+    <decl_stmt><decl><type><name>unsigned</name> <name>char</name> <modifier>*</modifier></type><name>p</name> <init>= <expr><operator>&amp;</operator><name><name>s</name><operator>-&gt;</operator><name>s3</name><operator>-&gt;</operator><name>rrec</name><operator>.</operator><name>data</name><index>[<expr><literal type="number">0</literal></expr>]</index></name></expr></init></decl>, <modifier>*</modifier><decl><type ref="prev"/><name>pl</name></decl>;</decl_stmt>
+    <decl_stmt><decl><type><name>unsigned</name> <name>short</name></type> <name>hbtype</name></decl>;</decl_stmt>
+    <decl_stmt><decl><type><name>unsigned</name> <name>int</name></type> <name>payload</name></decl>;</decl_stmt>
+    <decl_stmt><decl><type><name>unsigned</name> <name>int</name></type> <name>padding</name> <init>= <expr><literal type="number">16</literal></expr></init></decl>;</decl_stmt> <comment type="block">/* Use minimum padding */</comment>
+
+    <comment type="block">/* Read type and payload length first */</comment>
+    <expr_stmt><expr><name>hbtype</name> <operator>=</operator> <operator>*</operator><name>p</name><operator>++</operator></expr>;</expr_stmt>
+    <expr_stmt><expr><call><name>n2s</name><argument_list>(<argument><expr><name>p</name></expr></argument>, <argument><expr><name>payload</name></expr></argument>)</argument_list></call></expr>;</expr_stmt>
+    <expr_stmt><expr><name>pl</name> <operator>=</operator> <name>p</name></expr>;</expr_stmt>
+
+    <if>if <condition>(<expr><name><name>s</name><operator>-&gt;</operator><name>msg_callback</name></name></expr>)</condition><then>
+        <block type="pseudo"><expr_stmt><expr><call><name><name>s</name><operator>-&gt;</operator><name>msg_callback</name></name><argument_list>(<argument><expr><literal type="number">0</literal></expr></argument>, <argument><expr><name><name>s</name><operator>-&gt;</operator><name>version</name></name></expr></argument>, <argument><expr><name>TLS1_RT_HEARTBEAT</name></expr></argument>,
+            <argument><expr><operator>&amp;</operator><name><name>s</name><operator>-&gt;</operator><name>s3</name><operator>-&gt;</operator><name>rrec</name><operator>.</operator><name>data</name><index>[<expr><literal type="number">0</literal></expr>]</index></name></expr></argument>, <argument><expr><name><name>s</name><operator>-&gt;</operator><name>s3</name><operator>-&gt;</operator><name>rrec</name><operator>.</operator><name>length</name></name></expr></argument>,
+            <argument><expr><name>s</name></expr></argument>, <argument><expr><name><name>s</name><operator>-&gt;</operator><name>msg_callback_arg</name></name></expr></argument>)</argument_list></call></expr>;</expr_stmt></block></then></if>
+
+    <if>if <condition>(<expr><name>hbtype</name> <operator>==</operator> <name>TLS1_HB_REQUEST</name></expr>)</condition><then>
+    <block>{
+        <decl_stmt><decl><type><name>unsigned</name> <name>char</name> <modifier>*</modifier></type><name>buffer</name></decl>, <modifier>*</modifier><decl><type ref="prev"/><name>bp</name></decl>;</decl_stmt>
+        <decl_stmt><decl><type><name>int</name></type> <name>r</name></decl>;</decl_stmt>
+
+        <comment type="block">/* Allocate memory for the response, size is 1 byte
+         * message type, plus 2 bytes payload length, plus
+         * payload, plus padding
+         */</comment>
+        <expr_stmt><expr><name>buffer</name> <operator>=</operator> <call><name>OPENSSL_malloc</name><argument_list>(<argument><expr><literal type="number">3</literal> <operator>+</operator> <name>payload</name> <operator>+</operator> <name>padding</name></expr></argument>)</argument_list></call></expr>;</expr_stmt>
+        <expr_stmt><expr><name>bp</name> <operator>=</operator> <name>buffer</name></expr>;</expr_stmt>
+
+        <comment type="block">/* Enter response type, length and copy payload */</comment>
+        <expr_stmt><expr><operator>*</operator><name>bp</name><operator>++</operator> <operator>=</operator> <name>TLS1_HB_RESPONSE</name></expr>;</expr_stmt>
+        <expr_stmt><expr><call><name>s2n</name><argument_list>(<argument><expr><name>payload</name></expr></argument>, <argument><expr><name>bp</name></expr></argument>)</argument_list></call></expr>;</expr_stmt>
+        <expr_stmt><expr><call><name>memcpy</name><argument_list>(<argument><expr><name>bp</name></expr></argument>, <argument><expr><name>pl</name></expr></argument>, <argument><expr><name>payload</name></expr></argument>)</argument_list></call></expr>;</expr_stmt>
+        <comment type="block">/* Random padding */</comment>
+        <expr_stmt><expr><call><name>RAND_pseudo_bytes</name><argument_list>(<argument><expr><name>p</name></expr></argument>, <argument><expr><name>padding</name></expr></argument>)</argument_list></call></expr>;</expr_stmt>
+
+        <expr_stmt><expr><name>r</name> <operator>=</operator> <call><name>dtls1_write_bytes</name><argument_list>(<argument><expr><name>s</name></expr></argument>, <argument><expr><name>TLS1_RT_HEARTBEAT</name></expr></argument>, <argument><expr><name>buffer</name></expr></argument>, <argument><expr><literal type="number">3</literal> <operator>+</operator> <name>payload</name> <operator>+</operator> <name>padding</name></expr></argument>)</argument_list></call></expr>;</expr_stmt>
+
+        <if>if <condition>(<expr><name>r</name> <operator>&gt;=</operator> <literal type="number">0</literal> <operator>&amp;&amp;</operator> <name><name>s</name><operator>-&gt;</operator><name>msg_callback</name></name></expr>)</condition><then>
+            <block type="pseudo"><expr_stmt><expr><call><name><name>s</name><operator>-&gt;</operator><name>msg_callback</name></name><argument_list>(<argument><expr><literal type="number">1</literal></expr></argument>, <argument><expr><name><name>s</name><operator>-&gt;</operator><name>version</name></name></expr></argument>, <argument><expr><name>TLS1_RT_HEARTBEAT</name></expr></argument>,
+                <argument><expr><name>buffer</name></expr></argument>, <argument><expr><literal type="number">3</literal> <operator>+</operator> <name>payload</name> <operator>+</operator> <name>padding</name></expr></argument>,
+                <argument><expr><name>s</name></expr></argument>, <argument><expr><name><name>s</name><operator>-&gt;</operator><name>msg_callback_arg</name></name></expr></argument>)</argument_list></call></expr>;</expr_stmt></block></then></if>
+
+        <expr_stmt><expr><call><name>OPENSSL_free</name><argument_list>(<argument><expr><name>buffer</name></expr></argument>)</argument_list></call></expr>;</expr_stmt>
+
+        <if>if <condition>(<expr><name>r</name> <operator>&lt;</operator> <literal type="number">0</literal></expr>)</condition><then>
+            <block type="pseudo"><return>return <expr><name>r</name></expr>;</return></block></then></if>
+    }</block></then>
+    <elseif>else <if>if <condition>(<expr><name>hbtype</name> <operator>==</operator> <name>TLS1_HB_RESPONSE</name></expr>)</condition><then>
+    <block>{
+        <decl_stmt><decl><type><name>unsigned</name> <name>int</name></type> <name>seq</name></decl>;</decl_stmt>
+
+        <comment type="block">/* We only send sequence numbers (2 bytes unsigned int),
+         * and 16 random bytes, so we just try to read the
+         * sequence number */</comment>
+        <expr_stmt><expr><call><name>n2s</name><argument_list>(<argument><expr><name>pl</name></expr></argument>, <argument><expr><name>seq</name></expr></argument>)</argument_list></call></expr>;</expr_stmt>
+
+        <if>if <condition>(<expr><name>payload</name> <operator>==</operator> <literal type="number">18</literal> <operator>&amp;&amp;</operator> <name>seq</name> <operator>==</operator> <name><name>s</name><operator>-&gt;</operator><name>tlsext_hb_seq</name></name></expr>)</condition><then>
+        <block>{
+            <expr_stmt><expr><call><name>dtls1_stop_timer</name><argument_list>(<argument><expr><name>s</name></expr></argument>)</argument_list></call></expr>;</expr_stmt>
+            <expr_stmt><expr><name><name>s</name><operator>-&gt;</operator><name>tlsext_hb_seq</name></name><operator>++</operator></expr>;</expr_stmt>
+            <expr_stmt><expr><name><name>s</name><operator>-&gt;</operator><name>tlsext_hb_pending</name></name> <operator>=</operator> <literal type="number">0</literal></expr>;</expr_stmt>
+        }</block></then></if>
+    }</block></then></if></elseif></if>
+
+    <return>return <expr><literal type="number">0</literal></expr>;</return>
+}</block></function>
+<cpp:endif>#<cpp:directive>endif</cpp:directive></cpp:endif>
+</unit>
+
