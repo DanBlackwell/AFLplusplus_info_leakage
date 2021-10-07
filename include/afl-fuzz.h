@@ -158,7 +158,8 @@ struct queue_entry {
 
   u8 colorized,                         /* Do not run redqueen stage again  */
       cal_failed,                       /* Calibration failed?              */
-      hashfuzzClass;                    /* What hashfuzz partition does this input fall into? */
+      hashfuzzClass,                    /* What hashfuzz partition does this input fall into? */
+      discoveryOrder;                   /* For this path, what seed number am I? */
 
   bool trim_done,                       /* Trimmed?                         */
       was_fuzzed,                       /* historical, but needed for MOpt  */
@@ -1034,7 +1035,7 @@ void        deinit_py(void *);
 void mark_as_det_done(afl_state_t *, struct queue_entry *);
 void mark_as_variable(afl_state_t *, struct queue_entry *);
 void mark_as_redundant(afl_state_t *, struct queue_entry *, u8);
-void add_to_queue(afl_state_t *, u8 *, u32, u8, u8, u64, bool);
+void add_to_queue(afl_state_t *, u8 *, u32, u8, u8, u64, u8);
 void destroy_queue(afl_state_t *);
 void update_bitmap_score(afl_state_t *, struct queue_entry *);
 void cull_queue(afl_state_t *);

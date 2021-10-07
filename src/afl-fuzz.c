@@ -27,6 +27,7 @@
 #include "cmplog.h"
 #include <limits.h>
 #include <stdlib.h>
+#include "hashfuzz.h"
 #ifndef USEMMAP
   #include <sys/mman.h>
   #include <sys/stat.h>
@@ -423,6 +424,8 @@ int main(int argc, char **argv_orig, char **envp) {
   exit_1 = !!afl->afl_env.afl_bench_just_one;
 
   afl->hashfuzz_partitions = 0;
+  hashfuzzFoundPartitionsLen = 1024;
+  hashfuzzFoundPartitions = ck_alloc(sizeof(struct path_partitions) * hashfuzzFoundPartitionsLen);
 
   SAYF(cCYA "afl-fuzz" VERSION cRST
             " based on afl by Michal Zalewski and a large online community\n");
@@ -1974,6 +1977,20 @@ int main(int argc, char **argv_orig, char **envp) {
   #endif
 
   while (likely(!afl->stop_soon)) {
+
+    // Every queue cycle, swap in inputs from a different hashfuzz partition for each path
+    for (u32 i = 0; i < afl->queued_paths; i++) {
+      struct queue_entry *q = afl->queue_buf[i];
+
+      // Find the corresponding path_partition entry
+      for (u32 j = 0; j < hashfuzzFoundPartitionsFilled; j++) {
+        if (hashfuzzFoundPartitions[j].checksum == q->exec_cksum) {
+          // Only enable one input per path for each queue cycle
+          q->disabled = afl->queue_cycle % q->discoveryOrder == 0;
+          break;
+        }
+      }
+    }
 
     cull_queue(afl);
 

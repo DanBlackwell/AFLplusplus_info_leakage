@@ -429,7 +429,7 @@ static u8 check_if_text(afl_state_t *afl, struct queue_entry *q) {
 
 /* Append new test case to the queue. */
 
-void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det, u8 hashfuzzClass, u64 cksum, bool disabled) {
+void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det, u8 hashfuzzClass, u64 cksum, u8 discoveryOrder) {
 
   struct queue_entry *q = ck_alloc(sizeof(struct queue_entry));
 
@@ -442,7 +442,12 @@ void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det, u8 hashfu
   q->mother = afl->queue_cur;
   q->hashfuzzClass = hashfuzzClass;
   q->exec_cksum = cksum;
-  q->disabled = disabled;
+  q->discoveryOrder = discoveryOrder;
+
+  // Disable this input if we are not on that cycle parity
+  if (discoveryOrder != 0 && afl->queue_cycle % discoveryOrder == 0) {
+    q->disabled = true;
+  }
 
 #ifdef INTROSPECTION
   q->bitsmap_size = afl->bitsmap_size;
@@ -563,7 +568,7 @@ void update_bitmap_score(afl_state_t *afl, struct queue_entry *q) {
 
     if (afl->fsrv.trace_bits[i]) {
 
-      if (afl->top_rated[i]) {
+      if (afl->top_rated[i] && !afl->top_rated[i]->disabled) {
 
         /* Faster-executing or smaller test cases are favored. */
         u64 top_rated_fav_factor;

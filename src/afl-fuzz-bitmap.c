@@ -451,6 +451,48 @@ void write_crash_readme(afl_state_t *afl) {
 
 }
 
+
+// Return the number of partitions found for this checksum before this one
+int check_if_new_partition(u64 checksum, u8 partition) {
+  u32 partitionBitmap = 1 << partition;
+
+  // TODO: O(n) lookup is awful - at least sort the inputs so you can binary search on checksum...
+  for (u32 i = 0; i < hashfuzzFoundPartitionsFilled; i++) {
+    // If we've found an input that reaches this path
+    if (hashfuzzFoundPartitions[i].checksum == checksum) {
+      if (hashfuzzFoundPartitions[i].foundPartitions & partitionBitmap) {
+        // We've already found an input in this partition
+        return -1;
+      } else {
+        // This input discovers a new partition for this path
+        u8 foundAlready = hashfuzzFoundPartitions[i].foundPartitionsCount;
+
+        hashfuzzFoundPartitions[i].foundPartitions |= partitionBitmap;
+        hashfuzzFoundPartitions[i].foundPartitionsCount++;
+        return foundAlready;
+      }
+    }
+  }
+
+  if (hashfuzzFoundPartitionsFilled + 1 >= hashfuzzFoundPartitionsLen) {
+    hashfuzzFoundPartitionsLen *= 2;
+    size_t newSize = sizeof(struct path_partitions) * hashfuzzFoundPartitionsLen;
+    hashfuzzFoundPartitions = ck_realloc(hashfuzzFoundPartitions, newSize);
+                                         
+    if (!hashfuzzFoundPartitions) {
+      perror("malloc failed!");
+      return -1;
+    }
+  }
+
+  hashfuzzFoundPartitionsFilled++;
+  hashfuzzFoundPartitions[hashfuzzFoundPartitionsFilled] = 
+      (struct path_partitions){ checksum, partitionBitmap, 0 };
+
+  return 0;
+}
+
+
 /* Check if the result of an execve() during routine fuzzing is interesting,
    save or queue the input test case for further analysis if so. Returns 1 if
    entry is saved, 0 otherwise. */
@@ -490,32 +532,17 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
        future fuzzing, etc. */
 
     interesting = has_new_bits_unclassified(afl, afl->virgin_bits);
-    bool isDup = !interesting;
+    // bool isDup = !interesting;
 
     // Find out if we have a matching path with this hashfuzz classification
 
     u8 hashfuzzClass = hashfuzzClassify(mem, len, afl->hashfuzz_partitions);
 
-    if (afl->hashfuzz_partitions > 1 && !interesting) {
-      struct queue_entry *q;
-      cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
-      bool path_in_queue = false, duplicate = false;
+    // IMPORTANT: this needs calling even for new inputs 
+    //            (to build the map of covered partitions)
+    int discoveryNum = check_if_new_partition(cksum, hashfuzzClass);
 
-      for (u32 i = 0; i < afl->queued_paths; i++) {
-        q = afl->queue_buf[i];
-        if (q->exec_cksum == cksum) {
- 	  if (q->hashfuzzClass != hashfuzzClass) {
-            path_in_queue = true;
-	  } else {
-            duplicate = true;
-            break;
-	  }
-        }  
-      }
-
-      interesting = path_in_queue && !duplicate;
-    }
-
+    interesting = interesting || discoveryNum >= 0; // We don't have this one in the queue yet
 
     if (likely(!interesting)) {
 
@@ -542,7 +569,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", queue_fn); }
     ck_write(fd, mem, len, queue_fn);
     close(fd);
-    add_to_queue(afl, queue_fn, len, 0, hashfuzzClass, cksum, isDup);
+    add_to_queue(afl, queue_fn, len, 0, hashfuzzClass, cksum, discoveryNum);
 
 #ifdef INTROSPECTION
     if (afl->custom_mutators_count && afl->current_custom_fuzz) {

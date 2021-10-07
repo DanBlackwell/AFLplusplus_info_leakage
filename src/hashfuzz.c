@@ -5,6 +5,10 @@
 #include <time.h>
 #include <math.h>
 
+struct path_partitions *hashfuzzFoundPartitions;
+u32 hashfuzzFoundPartitionsFilled = 0;
+u32 hashfuzzFoundPartitionsLen;
+
 int findParity(int x) {
   int y = x ^ (x >> 1);
   y = y ^ (y >> 2);
