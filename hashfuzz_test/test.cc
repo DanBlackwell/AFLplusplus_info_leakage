@@ -24,7 +24,11 @@ int classifyMyNumber(const uint8_t *data, size_t size) {
     return retval;
 }
 
-extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
-  classifyMyNumber(Data, Size);
-  return 0;  // Non-zero return values are reserved for future use.
-}
+int main(int argc, char *argv[]) {
+	return 0;
+}	
+
+// extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
+//   classifyMyNumber(Data, Size);
+//   return 0;  // Non-zero return values are reserved for future use.
+// }

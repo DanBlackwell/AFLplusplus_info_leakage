@@ -490,6 +490,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
        future fuzzing, etc. */
 
     interesting = has_new_bits_unclassified(afl, afl->virgin_bits);
+    bool isDup = !interesting;
 
     // Find out if we have a matching path with this hashfuzz classification
 
@@ -541,7 +542,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", queue_fn); }
     ck_write(fd, mem, len, queue_fn);
     close(fd);
-    add_to_queue(afl, queue_fn, len, 0, hashfuzzClass, cksum);
+    add_to_queue(afl, queue_fn, len, 0, hashfuzzClass, cksum, isDup);
 
 #ifdef INTROSPECTION
     if (afl->custom_mutators_count && afl->current_custom_fuzz) {
