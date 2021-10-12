@@ -461,11 +461,13 @@ int check_if_new_partition(u64 checksum, u8 partition) {
     // If we've found an input that reaches this path
     if (hashfuzzFoundPartitions[i].checksum == checksum) {
       if (hashfuzzFoundPartitions[i].foundPartitions & partitionBitmap) {
+//	printf("Found identical partition %03hhu for checksum %015llu\n", partition, checksum);
         // We've already found an input in this partition
         return -1;
       } else {
         // This input discovers a new partition for this path
         u8 foundAlready = hashfuzzFoundPartitions[i].foundPartitionsCount;
+//	printf("Found new partition %03hhu for checksum %015llu\n", partition, checksum);
 
         hashfuzzFoundPartitions[i].foundPartitions |= partitionBitmap;
         hashfuzzFoundPartitions[i].foundPartitionsCount++;
@@ -485,9 +487,10 @@ int check_if_new_partition(u64 checksum, u8 partition) {
     }
   }
 
-  hashfuzzFoundPartitionsFilled++;
+//  printf("Found checksum %015llu with partition %03hhu\n", checksum, partition);
   hashfuzzFoundPartitions[hashfuzzFoundPartitionsFilled] = 
       (struct path_partitions){ checksum, partitionBitmap, 0 };
+  hashfuzzFoundPartitionsFilled++;
 
   return 0;
 }
@@ -538,11 +541,29 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
     u8 hashfuzzClass = hashfuzzClassify(mem, len, afl->hashfuzz_partitions);
 
-    // IMPORTANT: this needs calling even for new inputs 
-    //            (to build the map of covered partitions)
-    int discoveryNum = check_if_new_partition(cksum, hashfuzzClass);
+    cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
 
-    interesting = interesting || discoveryNum >= 0; // We don't have this one in the queue yet
+
+    bool matchesPathInQueue = false;
+    if (likely(!interesting)) {
+	struct queue_entry *q;
+        for (u32 i = 0; i < afl->queued_paths; i++) {
+            q = afl->queue_buf[i];
+            if (q->exec_cksum == cksum) {
+                matchesPathInQueue = true;
+                break;
+            }
+        }
+    }
+
+    int discoveryNum;
+    if (matchesPathInQueue || interesting) {
+        // IMPORTANT: this needs calling even for new inputs 
+        //            (to build the map of covered partitions)
+        discoveryNum = check_if_new_partition(cksum, hashfuzzClass);
+
+        interesting = interesting || discoveryNum >= 0; // We don't have this one in the queue yet
+    }
 
     if (likely(!interesting)) {
 

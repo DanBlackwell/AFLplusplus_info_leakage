@@ -1986,7 +1986,7 @@ int main(int argc, char **argv_orig, char **envp) {
       for (u32 j = 0; j < hashfuzzFoundPartitionsFilled; j++) {
         if (hashfuzzFoundPartitions[j].checksum == q->exec_cksum) {
           // Only enable one input per path for each queue cycle
-          q->disabled = afl->queue_cycle % q->discoveryOrder == 0;
+          q->disabled = afl->queue_cycle % hashfuzzFoundPartitions[j].foundPartitionsCount == 0;
           break;
         }
       }

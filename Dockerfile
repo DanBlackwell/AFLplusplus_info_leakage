@@ -72,11 +72,28 @@ ENV IS_DOCKER="1"
 #COPY --from=aflplusplus/afl-dyninst /usr/local/lib/libdyninstAPI_RT.so /usr/local/lib/libdyninstAPI_RT.so
 #COPY --from=aflplusplus/afl-dyninst /afl-dyninst/libAflDyninst.so /usr/local/lib/libAflDyninst.so
 
-COPY ./hashfuzz_test /aflPPtests
-WORKDIR /aflPPtests
+# COPY ./hashfuzz_test /aflPPtests
+# WORKDIR /aflPPtests
 
-CMD export RUNTIME=$(( 180 )); afl-clang-fast -o test_prog driver.c triangle.c -I . && \
-    mkdir -p OUT_16_branches && timeout $RUNTIME afl-fuzz -H 16 -i IN -o OUT_16_branches -- ./test_prog; echo "$(ls OUT_16_branches/default/queue | wc -l) items in queue"; \
-    mkdir -p OUT_8_branches && timeout $RUNTIME afl-fuzz -H 8 -i IN -o OUT_8_branches -- ./test_prog; echo "$(ls OUT_8_branches/default/queue | wc -l) items in queue"; \
-    mkdir -p OUT_4_branches && timeout $RUNTIME afl-fuzz -H 4 -i IN -o OUT_4_branches -- ./test_prog; echo "$(ls OUT_4_branches/default/queue | wc -l) items in queue"; \
-    mkdir -p OUT_1_branch   && timeout $RUNTIME afl-fuzz -H 1 -i IN -o OUT_1_branch -- ./test_prog; echo "$(ls OUT_1_branch/default/queue | wc -l) items in queue";
+COPY ./hyperGItests /hyperGItests
+
+# WORKDIR /hyperGItests/atalk
+# RUN export LD=afl-clang-fast; export CC=afl-clang-fast; export CXX=afl-clang-fast++; afl-clang-fast driver.c atalk.c -o atalk
+# 
+# WORKDIR /hyperGItests/classify
+# RUN export LD=afl-clang-fast; export CC=afl-clang-fast; export CXX=afl-clang-fast++; afl-clang-fast driver.c classify.c -o classify
+# 
+# WORKDIR /hyperGItests/triangle
+# RUN export LD=afl-clang-fast; export CC=afl-clang-fast; export CXX=afl-clang-fast++; afl-clang-fast driver.c triangle.c -o triangle
+# 
+# WORKDIR /hyperGItests/underflow
+# RUN export LD=afl-clang-fast; export CC=afl-clang-fast; export CXX=afl-clang-fast++; afl-clang-fast driver.c underflow.c -o underflow
+
+WORKDIR /hyperGItests/heartbleed
+RUN export LD=afl-clang-fast; export CC=afl-clang-fast; export CXX=afl-clang-fast++; make build_libs && test/build.sh
+
+# WORKDIR /hyperGItests/bignum_fuzz
+# RUN export LD=afl-clang-fast; export CC=afl-clang-fast; export CXX=afl-clang-fast++; ./config && make install && ./hashfuzz-fuzz.sh
+
+WORKDIR /hyperGItests
+CMD ./find_test_cases.sh
