@@ -467,7 +467,7 @@ int check_if_new_partition(u64 checksum, u8 partition) {
       } else {
         // This input discovers a new partition for this path
         u8 foundAlready = hashfuzzFoundPartitions[i].foundPartitionsCount;
-//	printf("Found new partition %03hhu for checksum %015llu\n", partition, checksum);
+	printf("Found new partition %03hhu for checksum %015llu\n", partition, checksum);
 
         hashfuzzFoundPartitions[i].foundPartitions |= partitionBitmap;
         hashfuzzFoundPartitions[i].foundPartitionsCount++;
@@ -487,9 +487,9 @@ int check_if_new_partition(u64 checksum, u8 partition) {
     }
   }
 
-//  printf("Found checksum %015llu with partition %03hhu\n", checksum, partition);
+  printf("Found checksum %015llu with partition %03hhu\n", checksum, partition);
   hashfuzzFoundPartitions[hashfuzzFoundPartitionsFilled] = 
-      (struct path_partitions){ checksum, partitionBitmap, 0 };
+      (struct path_partitions){ checksum, partitionBitmap, 1 };
   hashfuzzFoundPartitionsFilled++;
 
   return 0;
