@@ -444,8 +444,19 @@ void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det, u8 hashfu
   q->exec_cksum = cksum;
   q->discoveryOrder = discoveryOrder;
 
-  // Disable this input if we are not on that cycle parity
-  if (discoveryOrder != 0 && afl->queue_cycle % discoveryOrder == 0) {
+  // We'll use this to add an input for each partition during the initial run -
+  // it emulates the original program transformation (one seed added per partition)
+  static u64 discoveredPartitions = 0;
+
+  u64 partitionBit = 1 << hashfuzzClass;
+  if (!(partitionBit & discoveredPartitions)) {
+    // enable this seed if it's the first one for that partition
+    printf("Adding (and enabling) first seed for partition %hhu\n", hashfuzzClass);
+    discoveredPartitions |= partitionBit;
+    q->disabled = false;
+
+  } else if (discoveryOrder != 0 && afl->queue_cycle % discoveryOrder == 0) {
+    // Disable this input if we are not on that cycle parity
     q->disabled = true;
   }
 
