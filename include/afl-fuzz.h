@@ -1057,7 +1057,7 @@ void discover_word(u8 *ret, u32 *current, u32 *virgin);
 void init_count_class16(void);
 void minimize_bits(afl_state_t *, u8 *, u8 *);
 #ifndef SIMPLE_FILES
-u8 *describe_op(afl_state_t *, u8, size_t);
+u8 *describe_op(afl_state_t *, u8, u8, size_t);
 #endif
 u8 save_if_interesting(afl_state_t *, void *, u32, u8);
 u8 has_new_bits(afl_state_t *, u8 *);

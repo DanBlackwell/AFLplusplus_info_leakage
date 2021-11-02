@@ -306,7 +306,7 @@ void minimize_bits(afl_state_t *afl, u8 *dst, u8 *src) {
 /* Construct a file name for a new test case, capturing the operation
    that led to its discovery. Returns a ptr to afl->describe_op_buf_256. */
 
-u8 *describe_op(afl_state_t *afl, u8 new_bits, size_t max_description_len) {
+u8 *describe_op(afl_state_t *afl, u8 new_bits, u8 new_partition, size_t max_description_len) {
 
   size_t real_max_len =
       MIN(max_description_len, sizeof(afl->describe_op_buf_256));
@@ -386,6 +386,7 @@ u8 *describe_op(afl_state_t *afl, u8 new_bits, size_t max_description_len) {
   }
 
   if (new_bits == 2) { strcat(ret, ",+cov"); }
+  else if (new_partition) { strcat(ret, "+partition"); }
 
   if (unlikely(strlen(ret) >= max_description_len))
     FATAL("describe string is too long");
@@ -453,7 +454,7 @@ void write_crash_readme(afl_state_t *afl) {
 
 
 // Return the number of partitions found for this checksum before this one
-int check_if_new_partition(u64 checksum, u8 partition) {
+s8 check_if_new_partition(u64 checksum, u8 partition) {
   u32 partitionBitmap = 1 << partition;
 
   // TODO: O(n) lookup is awful - at least sort the inputs so you can binary search on checksum...
@@ -507,6 +508,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
   u8 *queue_fn = "";
   u8  new_bits = '\0';
+  s8  new_partition = 0;
   s32 fd;
   u8  keeping = 0, res, classified = 0;
   u64 cksum = 0;
@@ -529,20 +531,17 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
   if (likely(fault == afl->crash_mode)) {
 
-    bool interesting = false;
+    u8 interesting = 0;
 
     /* Keep only if there are new bits in the map, add to queue for
        future fuzzing, etc. */
 
-    interesting = has_new_bits_unclassified(afl, afl->virgin_bits);
-    // bool isDup = !interesting;
-
-    // Find out if we have a matching path with this hashfuzz classification
+    new_bits = has_new_bits_unclassified(afl, afl->virgin_bits);
+    interesting = new_bits;
 
     u8 hashfuzzClass = hashfuzzClassify(mem, len, afl->hashfuzz_partitions);
 
     cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
-
 
     bool matchesPathInQueue = false;
     if (likely(!interesting)) {
@@ -556,13 +555,13 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
         }
     }
 
-    int discoveryNum;
     if (matchesPathInQueue || interesting) {
+        // Find out if we have a matching path with this hashfuzz classification
         // IMPORTANT: this needs calling even for new inputs 
         //            (to build the map of covered partitions)
-        discoveryNum = check_if_new_partition(cksum, hashfuzzClass);
+        new_partition = check_if_new_partition(cksum, hashfuzzClass);
 
-        interesting = interesting || discoveryNum >= 0; // We don't have this one in the queue yet
+        interesting = interesting || (new_partition >= 0); // We don't have this one in the queue yet
     }
 
     if (likely(!interesting)) {
@@ -578,7 +577,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
     queue_fn = alloc_printf(
         "%s/queue/id:%06u,%s", afl->out_dir, afl->queued_paths,
-        describe_op(afl, new_bits, NAME_MAX - strlen("id:000000,")));
+        describe_op(afl, new_bits, new_partition >= 0, NAME_MAX - strlen("id:000000,")));
 
 #else
 
@@ -590,7 +589,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", queue_fn); }
     ck_write(fd, mem, len, queue_fn);
     close(fd);
-    add_to_queue(afl, queue_fn, len, 0, hashfuzzClass, cksum, discoveryNum);
+    add_to_queue(afl, queue_fn, len, 0, hashfuzzClass, cksum, new_partition);
 
 #ifdef INTROSPECTION
     if (afl->custom_mutators_count && afl->current_custom_fuzz) {
@@ -748,7 +747,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
       snprintf(fn, PATH_MAX, "%s/hangs/id:%06llu,%s", afl->out_dir,
                afl->unique_hangs,
-               describe_op(afl, 0, NAME_MAX - strlen("id:000000,")));
+               describe_op(afl, 0, 0, NAME_MAX - strlen("id:000000,")));
 
 #else
 
@@ -791,7 +790,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
       snprintf(fn, PATH_MAX, "%s/crashes/id:%06llu,sig:%02u,%s", afl->out_dir,
                afl->unique_crashes, afl->fsrv.last_kill_signal,
-               describe_op(afl, 0, NAME_MAX - strlen("id:000000,sig:00,")));
+               describe_op(afl, 0, 0, NAME_MAX - strlen("id:000000,sig:00,")));
 
 #else
 

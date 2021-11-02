@@ -1977,19 +1977,31 @@ int main(int argc, char **argv_orig, char **envp) {
   #endif
 
   while (likely(!afl->stop_soon)) {
+    
+    static u32 lastCycle = 1;
+    if (afl->queue_cycle != lastCycle) {
+	lastCycle = afl->queue_cycle;
+        printf("DAN: BEGINNING NEW QUEUE CYCLE %llu\n", afl->queue_cycle);
+        // Every queue cycle, swap in inputs from a different hashfuzz partition for each path
+        for (u32 i = 0; i < afl->queued_paths; i++) {
+          struct queue_entry *q = afl->queue_buf[i];
 
-    // Every queue cycle, swap in inputs from a different hashfuzz partition for each path
-    for (u32 i = 0; i < afl->queued_paths; i++) {
-      struct queue_entry *q = afl->queue_buf[i];
-
-      // Find the corresponding path_partition entry
-      for (u32 j = 0; j < hashfuzzFoundPartitionsFilled; j++) {
-        if (hashfuzzFoundPartitions[j].checksum == q->exec_cksum) {
-          // Only enable one input per path for each queue cycle
-          q->disabled = afl->queue_cycle % hashfuzzFoundPartitions[j].foundPartitionsCount == 0;
-          break;
+          // Find the corresponding path_partition entry
+          for (u32 j = 0; j < hashfuzzFoundPartitionsFilled; j++) {
+            if (hashfuzzFoundPartitions[j].checksum == q->exec_cksum) {
+              // Only enable one input per path for each queue cycle
+              q->disabled = afl->queue_cycle % hashfuzzFoundPartitions[j].foundPartitionsCount != q->discoveryOrder;
+              printf("[%04d] cksum: %020llu, foundPartitionsCount: %d, partition: %03u, discoveryOrder: %d, enabled: %d\n", 
+			  i,
+			  q->exec_cksum, 
+                          hashfuzzFoundPartitions[j].foundPartitionsCount,
+            		  q->hashfuzzClass,
+            		  q->discoveryOrder,
+            		  !(q->disabled));
+              break;
+            }
+          }
         }
-      }
     }
 
     cull_queue(afl);
