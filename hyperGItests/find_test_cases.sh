@@ -1,7 +1,7 @@
 #!/bin/bash
 
 export RUNTIME=$(( 8 * 3600 )) 
-export RUNTIME=$(( 300 )) 
+export RUNTIME=$(( 3600 )) 
 export BRANCHES=8
 
 mkdir -p results 
@@ -21,12 +21,12 @@ pushd results
 #	  	timeout $RUNTIME afl-fuzz -H $BRANCHES -i IN/ -o OUT -- /hyperGItests/classify/classify 2>&1 > fuzzing.log &
 #	popd
 #
-#	mkdir -p triangle 
-#       	pushd triangle 
-#		mkdir -p IN/ OUT/
-#		echo "29 3 28" > IN/seed
-#		timeout $RUNTIME afl-fuzz -H $BRANCHES -i IN/ -o OUT -- /hyperGItests/triangle/triangle 2>&1 > fuzzing.log &
-#	popd
+	mkdir -p triangle 
+       	pushd triangle 
+		mkdir -p IN/ OUT/
+		echo "29 3 28" > IN/seed
+		timeout $RUNTIME afl-fuzz -H $BRANCHES -i IN/ -o OUT -- /hyperGItests/triangle/triangle 2>&1 > fuzzing.log &
+	popd
 #
 #	mkdir -p underflow 
 #	pushd underflow 
@@ -36,16 +36,16 @@ pushd results
 #		echo "1079 140723055538320" > IN/seed3
 #		timeout $RUNTIME afl-fuzz -H $BRANCHES -i IN/ -o OUT -- /hyperGItests/underflow/underflow 2>&1 > fuzzing.log &
 #	popd
-
-	mkdir -p heartbleed 
-	pushd heartbleed 
-		mkdir -p IN/ OUT/
-  		echo "35333241374232453942364639090900000012000000" > IN/seed
-		echo "353332413742324539423646390909000000" > IN/seed2
-		echo "D62F6BEB04B5A7FEBB56D078E638CA45FFC00000" > IN/seed3
-  		timeout $RUNTIME afl-fuzz -H $BRANCHES -i IN/ -o OUT -- /hyperGItests/heartbleed/test/heartbeat_simple.exe 2>&1 > fuzzing.log &
-	popd
-
+#
+#	mkdir -p heartbleed 
+#	pushd heartbleed 
+#		mkdir -p IN/ OUT/
+#  		echo "35333241374232453942364639090900000012000000" > IN/seed
+#		echo "353332413742324539423646390909000000" > IN/seed2
+#		echo "D62F6BEB04B5A7FEBB56D078E638CA45FFC00000" > IN/seed3
+#  		timeout $RUNTIME afl-fuzz -H $BRANCHES -i IN/ -o OUT -- /hyperGItests/heartbleed/test/heartbeat_simple.exe 2>&1 > fuzzing.log &
+#	popd
+#
 #	mkdir -p bignum_fuzz
 #       	pushd bignum_fuzz
 #		mkdir -p IN/ OUT/
@@ -55,9 +55,14 @@ pushd results
 
 	wait
 
-        pushd heartbleed
+	pushd triangle
                 mkdir -p MINIFIED
-                afl-cmin -i OUT/default/queue -o MINIFIED -- /hyperGItests/heartbleed/test/heartbeat_simple.exe
-        popd
+                afl-cmin -i OUT/default/queue -o MINIFIED -- /hyperGItests/triangle/triangle
+	popd
+
+#        pushd heartbleed
+#                mkdir -p MINIFIED
+#                afl-cmin -i OUT/default/queue -o MINIFIED -- /hyperGItests/heartbleed/test/heartbeat_simple.exe
+#        popd
 
 popd

@@ -1982,7 +1982,7 @@ int main(int argc, char **argv_orig, char **envp) {
   #endif
 
   while (likely(!afl->stop_soon)) {
-    
+
     static u32 lastCycle = 1;
     if (afl->queue_cycle != lastCycle) {
 	lastCycle = afl->queue_cycle;
@@ -2010,6 +2010,9 @@ int main(int argc, char **argv_orig, char **envp) {
         }
       }
     }
+
+    // We have changed the enabled entries - need to rebuild the alias probability table
+    afl->reinit_table = 1;
 
     cull_queue(afl);
 
@@ -2212,11 +2215,9 @@ int main(int argc, char **argv_orig, char **envp) {
 
         if (unlikely(prev_queued_paths < afl->queued_paths ||
                      afl->reinit_table)) {
-
           // we have new queue entries since the last run, recreate alias table
           prev_queued_paths = afl->queued_paths;
           create_alias_table(afl);
-
         }
 
         afl->current_entry = select_next_queue_entry(afl);

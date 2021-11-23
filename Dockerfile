@@ -83,15 +83,15 @@ COPY ./hyperGItests /hyperGItests
 # WORKDIR /hyperGItests/classify
 # RUN export LD=afl-clang-fast; export CC=afl-clang-fast; export CXX=afl-clang-fast++; afl-clang-fast driver.c classify.c -o classify
 # 
-# WORKDIR /hyperGItests/triangle
-# RUN export LD=afl-clang-fast; export CC=afl-clang-fast; export CXX=afl-clang-fast++; afl-clang-fast driver.c triangle.c -o triangle
+WORKDIR /hyperGItests/triangle
+RUN export LD=afl-clang-fast; export CC=afl-clang-fast; export CXX=afl-clang-fast++; afl-clang-fast driver.c triangle.c -o triangle
 # 
 # WORKDIR /hyperGItests/underflow
 # RUN export LD=afl-clang-fast; export CC=afl-clang-fast; export CXX=afl-clang-fast++; afl-clang-fast driver.c underflow.c -o underflow
-
-WORKDIR /hyperGItests/heartbleed
-RUN export LD=afl-clang-fast; export CC=afl-clang-fast; export CXX=afl-clang-fast++; make build_libs && test/build.sh
-
+#
+#WORKDIR /hyperGItests/heartbleed
+#RUN export LD=afl-clang-fast; export CC=afl-clang-fast; export CXX=afl-clang-fast++; make build_libs && test/build.sh
+#
 # WORKDIR /hyperGItests/bignum_fuzz
 # RUN export LD=afl-clang-fast; export CC=afl-clang-fast; export CXX=afl-clang-fast++; ./config && make install && ./hashfuzz-fuzz.sh
 
