@@ -158,7 +158,8 @@ struct queue_entry {
 
   u8 colorized,                         /* Do not run redqueen stage again  */
       cal_failed,                       /* Calibration failed?              */
-      hashfuzzClass;                    /* What hashfuzz partition does this input fall into? */
+      hashfuzzClass,                    /* What hashfuzz partition does this input fall into? */
+      discoveryOrder;                   /* For this path, what seed number am I? */
 
   bool trim_done,                       /* Trimmed?                         */
       was_fuzzed,                       /* historical, but needed for MOpt  */
@@ -1034,7 +1035,7 @@ void        deinit_py(void *);
 void mark_as_det_done(afl_state_t *, struct queue_entry *);
 void mark_as_variable(afl_state_t *, struct queue_entry *);
 void mark_as_redundant(afl_state_t *, struct queue_entry *, u8);
-void add_to_queue(afl_state_t *, u8 *, u32, u8, u8, u64);
+void add_to_queue(afl_state_t *, u8 *, u32, u8, u8, u64, u8);
 void destroy_queue(afl_state_t *);
 void update_bitmap_score(afl_state_t *, struct queue_entry *);
 void cull_queue(afl_state_t *);
@@ -1056,11 +1057,12 @@ void discover_word(u8 *ret, u32 *current, u32 *virgin);
 void init_count_class16(void);
 void minimize_bits(afl_state_t *, u8 *, u8 *);
 #ifndef SIMPLE_FILES
-u8 *describe_op(afl_state_t *, u8, size_t);
+u8 *describe_op(afl_state_t *, u8, u8, size_t);
 #endif
 u8 save_if_interesting(afl_state_t *, void *, u32, u8);
 u8 has_new_bits(afl_state_t *, u8 *);
 u8 has_new_bits_unclassified(afl_state_t *, u8 *);
+s8 check_if_new_partition(u64, u8);
 
 /* Extras */
 

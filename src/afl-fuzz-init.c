@@ -772,7 +772,7 @@ void read_testcases(afl_state_t *afl, u8 *directory) {
       // Start with hashfuzz partition = 0, during the dry runs it will be set
 
       add_to_queue(afl, fn2, st.st_size >= MAX_FILE ? MAX_FILE : st.st_size,
-                   passed_det, 0, 0);
+                   passed_det, 0, 0, 0);
 
       if (unlikely(afl->shm.cmplog_mode)) {
 
@@ -1153,6 +1153,8 @@ void perform_dry_run(afl_state_t *afl) {
 
     q = afl->queue_buf[idx];
     if (!q || q->disabled || q->cal_failed || !q->exec_cksum) { continue; }
+
+    check_if_new_partition(q->exec_cksum, q->hashfuzzClass);
 
     u32 done = 0;
     for (i = idx + 1;

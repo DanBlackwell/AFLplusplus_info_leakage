@@ -23,7 +23,7 @@
  */
 
 #include "afl-fuzz.h"
-#include "hashfuzz.c"
+#include "hashfuzz.h"
 #include <limits.h>
 #include <ctype.h>
 #include <math.h>
@@ -429,7 +429,7 @@ static u8 check_if_text(afl_state_t *afl, struct queue_entry *q) {
 
 /* Append new test case to the queue. */
 
-void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det, u8 hashfuzzClass, u64 cksum) {
+void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det, u8 hashfuzzClass, u64 cksum, u8 discoveryOrder) {
 
   struct queue_entry *q = ck_alloc(sizeof(struct queue_entry));
 
@@ -442,6 +442,25 @@ void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det, u8 hashfu
   q->mother = afl->queue_cur;
   q->hashfuzzClass = hashfuzzClass;
   q->exec_cksum = cksum;
+  q->discoveryOrder = discoveryOrder;
+  q->disabled = false;
+
+  // We'll use this to add an input for each partition during the initial run -
+  // it emulates the original program transformation (one seed added per partition)
+  static u64 discoveredPartitions = 0;
+
+  u64 partitionBit = 1 << hashfuzzClass;
+  if (!(partitionBit & discoveredPartitions)) {
+    // enable this seed if it's the first one for that partition
+    printf("Adding (and enabling) first seed for partition %hhu\n", hashfuzzClass);
+    discoveredPartitions |= partitionBit;
+    q->disabled = false;
+
+  } else if (discoveryOrder != 0 && afl->queue_cycle % discoveryOrder == 0) {
+    // Disable this input if we are not on that cycle parity
+    q->disabled = true;
+    printf("disabling %020llu as it is discovery num %d, and we are on queue cycle :%llu\n", cksum, discoveryOrder, afl->queue_cycle);
+  }
 
 #ifdef INTROSPECTION
   q->bitsmap_size = afl->bitsmap_size;
@@ -562,7 +581,7 @@ void update_bitmap_score(afl_state_t *afl, struct queue_entry *q) {
 
     if (afl->fsrv.trace_bits[i]) {
 
-      if (afl->top_rated[i]) {
+      if (afl->top_rated[i] && !afl->top_rated[i]->disabled) {
 
         /* Faster-executing or smaller test cases are favored. */
         u64 top_rated_fav_factor;

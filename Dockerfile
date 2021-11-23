@@ -77,23 +77,23 @@ ENV IS_DOCKER="1"
 
 COPY ./hyperGItests /hyperGItests
 
-WORKDIR /hyperGItests/atalk
-RUN afl-clang-fast++ driver.cpp atalk.c -o atalk
-
-WORKDIR /hyperGItests/classify
-RUN afl-clang-fast driver.c classify.c -o classify
-
-WORKDIR /hyperGItests/triangle
-RUN afl-clang-fast driver.c triangle.c -o triangle
-
-WORKDIR /hyperGItests/underflow
-RUN afl-clang-fast driver.c underflow.c -o underflow
+# WORKDIR /hyperGItests/atalk
+# RUN export LD=afl-clang-fast; export CC=afl-clang-fast; export CXX=afl-clang-fast++; afl-clang-fast driver.c atalk.c -o atalk
+# 
+# WORKDIR /hyperGItests/classify
+# RUN export LD=afl-clang-fast; export CC=afl-clang-fast; export CXX=afl-clang-fast++; afl-clang-fast driver.c classify.c -o classify
+# 
+# WORKDIR /hyperGItests/triangle
+# RUN export LD=afl-clang-fast; export CC=afl-clang-fast; export CXX=afl-clang-fast++; afl-clang-fast driver.c triangle.c -o triangle
+# 
+# WORKDIR /hyperGItests/underflow
+# RUN export LD=afl-clang-fast; export CC=afl-clang-fast; export CXX=afl-clang-fast++; afl-clang-fast driver.c underflow.c -o underflow
 
 WORKDIR /hyperGItests/heartbleed
-RUN CC=afl-clang-fast make build_libs && test/build.sh
+RUN export LD=afl-clang-fast; export CC=afl-clang-fast; export CXX=afl-clang-fast++; make build_libs && test/build.sh
 
-WORKDIR /hyperGItests/bignum
-RUN export CC=afl-clang-fast; ./config && make && ./buildbntest.sh
+# WORKDIR /hyperGItests/bignum_fuzz
+# RUN export LD=afl-clang-fast; export CC=afl-clang-fast; export CXX=afl-clang-fast++; ./config && make install && ./hashfuzz-fuzz.sh
 
 WORKDIR /hyperGItests
 CMD ./find_test_cases.sh

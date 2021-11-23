@@ -27,6 +27,8 @@
 #include "cmplog.h"
 #include <limits.h>
 #include <stdlib.h>
+#include "hashfuzz.h"
+#include "hashmap.h"
 #ifndef USEMMAP
   #include <sys/mman.h>
   #include <sys/stat.h>
@@ -423,7 +425,13 @@ int main(int argc, char **argv_orig, char **envp) {
   exit_1 = !!afl->afl_env.afl_bench_just_one;
 
   afl->hashfuzz_partitions = 0;
-
+  hashfuzzFoundPartitions = hashmap_new_with_allocator(ck_alloc, ck_realloc, ck_free,
+		  sizeof(struct path_partitions), 0, 0, 0,
+		  path_partitions_hash, path_partitions_compare,
+		  NULL, NULL);
+//  hashfuzzFoundPartitions = hashmap_new(sizeof(struct path_partitions), 0, 0, 0,
+//		  path_partitions_hash, path_partitions_compare, NULL, NULL);
+		                        
   SAYF(cCYA "afl-fuzz" VERSION cRST
             " based on afl by Michal Zalewski and a large online community\n");
 
@@ -1974,6 +1982,34 @@ int main(int argc, char **argv_orig, char **envp) {
   #endif
 
   while (likely(!afl->stop_soon)) {
+    
+    static u32 lastCycle = 1;
+    if (afl->queue_cycle != lastCycle) {
+	lastCycle = afl->queue_cycle;
+        printf("DAN: BEGINNING NEW QUEUE CYCLE %llu\n", afl->queue_cycle);
+        // Every queue cycle, swap in inputs from a different hashfuzz partition for each path
+        for (u32 i = 0; i < afl->queued_paths; i++) {
+          struct queue_entry *q = afl->queue_buf[i];
+
+          // Find the corresponding path_partition entry
+	  struct path_partitions sought = { .checksum = q->exec_cksum };
+	  struct path_partitions *found = hashmap_get(hashfuzzFoundPartitions, &sought);
+
+	  if (!found) {
+		  printf("WTFFFF failed to find path_partition with checksum %020llu\n", q->exec_cksum);
+	  } else {
+              // Only enable one input per path for each queue cycle
+              q->disabled = afl->queue_cycle % found->foundPartitionsCount != q->discoveryOrder;
+              printf("[%04d] cksum: %020llu, foundPartitionsCount: %d, partition: %03u, discoveryOrder: %d, enabled: %d\n", 
+			  i,
+			  q->exec_cksum, 
+                          found->foundPartitionsCount,
+            		  q->hashfuzzClass,
+            		  q->discoveryOrder,
+            		  !(q->disabled));
+        }
+      }
+    }
 
     cull_queue(afl);
 
