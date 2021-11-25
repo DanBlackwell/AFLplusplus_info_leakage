@@ -1062,6 +1062,7 @@ u8 *describe_op(afl_state_t *, u8, u8, size_t);
 u8 save_if_interesting(afl_state_t *, void *, u32, u8);
 u8 has_new_bits(afl_state_t *, u8 *);
 u8 has_new_bits_unclassified(afl_state_t *, u8 *);
+s8 check_if_new_partition(u64, u8);
 
 /* Extras */
 

@@ -28,6 +28,7 @@
 #include <limits.h>
 #include <stdlib.h>
 #include "hashfuzz.h"
+#include "hashmap.h"
 #ifndef USEMMAP
   #include <sys/mman.h>
   #include <sys/stat.h>
@@ -424,9 +425,13 @@ int main(int argc, char **argv_orig, char **envp) {
   exit_1 = !!afl->afl_env.afl_bench_just_one;
 
   afl->hashfuzz_partitions = 0;
-  hashfuzzFoundPartitionsLen = 1024;
-  hashfuzzFoundPartitions = ck_alloc(sizeof(struct path_partitions) * hashfuzzFoundPartitionsLen);
-
+  hashfuzzFoundPartitions = hashmap_new_with_allocator(ck_alloc, ck_realloc, ck_free,
+		  sizeof(struct path_partitions), 0, 0, 0,
+		  path_partitions_hash, path_partitions_compare,
+		  NULL, NULL);
+//  hashfuzzFoundPartitions = hashmap_new(sizeof(struct path_partitions), 0, 0, 0,
+//		  path_partitions_hash, path_partitions_compare, NULL, NULL);
+		                        
   SAYF(cCYA "afl-fuzz" VERSION cRST
             " based on afl by Michal Zalewski and a large online community\n");
 
@@ -1977,7 +1982,7 @@ int main(int argc, char **argv_orig, char **envp) {
   #endif
 
   while (likely(!afl->stop_soon)) {
-    
+
     static u32 lastCycle = 1;
     if (afl->queue_cycle != lastCycle) {
 	lastCycle = afl->queue_cycle;
@@ -1987,22 +1992,27 @@ int main(int argc, char **argv_orig, char **envp) {
           struct queue_entry *q = afl->queue_buf[i];
 
           // Find the corresponding path_partition entry
-          for (u32 j = 0; j < hashfuzzFoundPartitionsFilled; j++) {
-            if (hashfuzzFoundPartitions[j].checksum == q->exec_cksum) {
+	  struct path_partitions sought = { .checksum = q->exec_cksum };
+	  struct path_partitions *found = hashmap_get(hashfuzzFoundPartitions, &sought);
+
+	  if (!found) {
+		  printf("WTFFFF failed to find path_partition with checksum %020llu\n", q->exec_cksum);
+	  } else {
               // Only enable one input per path for each queue cycle
-              q->disabled = afl->queue_cycle % hashfuzzFoundPartitions[j].foundPartitionsCount != q->discoveryOrder;
+              q->disabled = afl->queue_cycle % found->foundPartitionsCount != q->discoveryOrder;
               printf("[%04d] cksum: %020llu, foundPartitionsCount: %d, partition: %03u, discoveryOrder: %d, enabled: %d\n", 
 			  i,
 			  q->exec_cksum, 
-                          hashfuzzFoundPartitions[j].foundPartitionsCount,
+                          found->foundPartitionsCount,
             		  q->hashfuzzClass,
             		  q->discoveryOrder,
             		  !(q->disabled));
-              break;
-            }
-          }
         }
+      }
     }
+
+    // We have changed the enabled entries - need to rebuild the alias probability table
+    afl->reinit_table = 1;
 
     cull_queue(afl);
 
@@ -2205,11 +2215,9 @@ int main(int argc, char **argv_orig, char **envp) {
 
         if (unlikely(prev_queued_paths < afl->queued_paths ||
                      afl->reinit_table)) {
-
           // we have new queue entries since the last run, recreate alias table
           prev_queued_paths = afl->queued_paths;
           create_alias_table(afl);
-
         }
 
         afl->current_entry = select_next_queue_entry(afl);

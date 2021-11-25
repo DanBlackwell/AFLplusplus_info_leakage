@@ -1154,6 +1154,8 @@ void perform_dry_run(afl_state_t *afl) {
     q = afl->queue_buf[idx];
     if (!q || q->disabled || q->cal_failed || !q->exec_cksum) { continue; }
 
+    check_if_new_partition(q->exec_cksum, q->hashfuzzClass);
+
     u32 done = 0;
     for (i = idx + 1;
          i < afl->queued_paths && !done && likely(afl->queue_buf[i]); i++) {

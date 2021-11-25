@@ -25,6 +25,7 @@
 
 #include "afl-fuzz.h"
 #include "hashfuzz.h"
+#include "hashmap.h"
 #include <limits.h>
 #if !defined NAME_MAX
   #define NAME_MAX _XOPEN_NAME_MAX
@@ -457,6 +458,35 @@ void write_crash_readme(afl_state_t *afl) {
 s8 check_if_new_partition(u64 checksum, u8 partition) {
   u32 partitionBitmap = 1 << partition;
 
+  struct path_partitions sought = { .checksum = checksum };
+  struct path_partitions *found = hashmap_get(hashfuzzFoundPartitions, &sought);
+
+  if (found) {
+    if (found->foundPartitions & partitionBitmap) {
+      // printf("Found identical partition %03hhu for checksum %020llu\n", partition, checksum);
+      // We've already found an input in this partition
+      return -1;
+    } else {
+      // This input discovers a new partition for this path
+      u8 foundAlready = found->foundPartitionsCount;
+      printf("Found new partition %03hhu for checksum %020llu\n", partition, checksum);
+
+      found->foundPartitions |= partitionBitmap;
+      found->foundPartitionsCount++;
+      return foundAlready;
+    }
+  }
+
+  printf("Found checksum %020llu with partition %03hhu, hashmap count: %llu\n", checksum, partition, hashmap_count(hashfuzzFoundPartitions));
+  sought.foundPartitions = partitionBitmap;
+  sought.foundPartitionsCount = 1;
+  hashmap_set(hashfuzzFoundPartitions, &sought);
+
+  return 0;
+}
+
+/*
+
   // TODO: O(n) lookup is awful - at least sort the inputs so you can binary search on checksum...
   for (u32 i = 0; i < hashfuzzFoundPartitionsFilled; i++) {
     // If we've found an input that reaches this path
@@ -495,6 +525,7 @@ s8 check_if_new_partition(u64 checksum, u8 partition) {
 
   return 0;
 }
+*/
 
 
 /* Check if the result of an execve() during routine fuzzing is interesting,
