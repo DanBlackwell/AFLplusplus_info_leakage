@@ -4,6 +4,7 @@
 
 #include <unistd.h>
 #include <sys/syscall.h>
+#include "../write_wrappers/wrapper.h"
 
 int classifyMyNumber(const uint8_t *data, size_t size) {
     unsigned char classify = 0;
@@ -32,6 +33,13 @@ int classifyMyNumber(const uint8_t *data, size_t size) {
 }
 
 int main(int argc, char *argv[]) {
+  if (argc != 4) {
+    printError("Usage: %s hashfuzz_partition_1 hashfuzz_partition_2 hashfuzz_partition_3\n", argv[0]);
+    return 1;
+  }
+
+  initHashfuzz(argc, argv);
+
   char buf[4096];
   ssize_t len;
   len = read(STDIN_FILENO, buf, 4096);

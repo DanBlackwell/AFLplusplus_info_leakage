@@ -9,6 +9,8 @@
 #include <stddef.h>
 #include "hashmap.h"
 
+#pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
+
 static void *(*_malloc)(size_t) = NULL;
 static void *(*_realloc)(void *, size_t) = NULL;
 static void (*_free)(void *) = NULL;
