@@ -1,5 +1,9 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <string.h>
+
+#include <unistd.h>
+#include <sys/syscall.h>
 
 int classifyMyNumber(const uint8_t *data, size_t size) {
     unsigned char classify = 0;
@@ -10,6 +14,9 @@ int classifyMyNumber(const uint8_t *data, size_t size) {
     }
 
     if (classify % 64 == 0) {
+      if (1 / classify - 128 > 0) 
+        retval = 7;
+      else
         retval = 12;
     }
 
@@ -25,10 +32,11 @@ int classifyMyNumber(const uint8_t *data, size_t size) {
 }
 
 int main(int argc, char *argv[]) {
+  char buf[4096];
+  ssize_t len;
+  len = read(STDIN_FILENO, buf, 4096);
+
+  printf("class: %d\n", classifyMyNumber(buf, len));
+
 	return 0;
 }	
-
-// extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
-//   classifyMyNumber(Data, Size);
-//   return 0;  // Non-zero return values are reserved for future use.
-// }

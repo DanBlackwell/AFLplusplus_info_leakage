@@ -1,0 +1,8 @@
+<HFCLASS:0>write
+<HFCLASS:0><HFCLASS:6><HFCLASS:4><HFCLASS:0><HFCLASS:4><HFCLASS:6><HFCLASS:2>printf
+fprintf
+vprintf
+vfprintf
+fputs
+puts
+fwrite
