@@ -101,7 +101,9 @@ static void usage(u8 *argv0, int more_help) {
       "Required parameters:\n"
       "  -i dir        - input directory with test cases\n"
       "  -o dir        - output directory for fuzzer findings\n\n"
+#ifdef HASHFUZZ
       "  -H partitions - number of hashfuzz partitions to use\n\n"
+#endif
 
       "Execution control settings:\n"
       "  -p schedule   - power schedules compute a seed's performance score:\n"
@@ -424,6 +426,7 @@ int main(int argc, char **argv_orig, char **envp) {
   if (afl->shm.map_size) { afl->fsrv.map_size = afl->shm.map_size; }
   exit_1 = !!afl->afl_env.afl_bench_just_one;
 
+#ifdef HASHFUZZ
   afl->hashfuzz_partitions = 0;
   hashfuzzFoundPartitions = hashmap_new_with_allocator(ck_alloc, ck_realloc, ck_free,
 		  sizeof(struct path_partitions), 0, 0, 0,
@@ -431,7 +434,8 @@ int main(int argc, char **argv_orig, char **envp) {
 		  NULL, NULL);
 //  hashfuzzFoundPartitions = hashmap_new(sizeof(struct path_partitions), 0, 0, 0,
 //		  path_partitions_hash, path_partitions_compare, NULL, NULL);
-		                        
+#endif
+
   SAYF(cCYA "afl-fuzz" VERSION cRST
             " based on afl by Michal Zalewski and a large online community\n");
 
@@ -1099,6 +1103,7 @@ int main(int argc, char **argv_orig, char **envp) {
 
       } break;
 
+#ifdef HASHFUZZ
       case 'H': {                                                /* hashfuzz */
 
         if (!optarg ||
@@ -1112,7 +1117,7 @@ int main(int argc, char **argv_orig, char **envp) {
         break;
 
       }
-
+#endif
 
       case 'h':
         show_help++;
@@ -1133,7 +1138,11 @@ int main(int argc, char **argv_orig, char **envp) {
 
   }
 
+#ifdef HASHFUZZ
   if (optind == argc || !afl->hashfuzz_partitions || !afl->in_dir || !afl->out_dir || show_help) {
+#else
+  if (optind == argc || !afl->in_dir || !afl->out_dir || show_help) {
+#endif
 
     usage(argv[0], show_help);
 
@@ -1983,6 +1992,7 @@ int main(int argc, char **argv_orig, char **envp) {
 
   while (likely(!afl->stop_soon)) {
 
+#ifdef HASHFUZZ
     static u32 lastCycle = 1;
     if (afl->queue_cycle != lastCycle) {
 	lastCycle = afl->queue_cycle;
@@ -2001,18 +2011,19 @@ int main(int argc, char **argv_orig, char **envp) {
               // Only enable one input per path for each queue cycle
               q->disabled = afl->queue_cycle % found->foundPartitionsCount != q->discoveryOrder;
               printf("[%04d] cksum: %020llu, foundPartitionsCount: %d, partition: %03u, discoveryOrder: %d, enabled: %d\n", 
-			  i,
-			  q->exec_cksum, 
-                          found->foundPartitionsCount,
-            		  q->hashfuzzClass,
-            		  q->discoveryOrder,
-            		  !(q->disabled));
+			               i,
+			               q->exec_cksum, 
+                     found->foundPartitionsCount,
+            		     q->hashfuzzClass,
+            		     q->discoveryOrder,
+            		     !(q->disabled));
         }
       }
     }
 
     // We have changed the enabled entries - need to rebuild the alias probability table
     afl->reinit_table = 1;
+#endif
 
     cull_queue(afl);
 

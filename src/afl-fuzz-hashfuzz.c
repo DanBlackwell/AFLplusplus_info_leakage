@@ -7,10 +7,10 @@
 #include <math.h>
 #include "hashmap.h"
 
-// struct path_partitions *hashfuzzFoundPartitions;
 struct hashmap *hashfuzzFoundPartitions;
 
-s32 path_partitions_compare(const void *a, const void *b, void *udata) {
+s32 path_partitions_compare(const void *a, const void *b, 
+                            __attribute__((unused)) void *udata) {
   const struct path_partitions *ppa = a;
   const struct path_partitions *ppb = b;
   return ppa->checksum - ppb->checksum;

@@ -89,7 +89,7 @@ struct hashmap *hashmap_new_with_allocator(
     _malloc = _malloc ? _malloc : malloc;
     _realloc = _realloc ? _realloc : realloc;
     _free = _free ? _free : free;
-    int ncap = 16;
+    size_t ncap = 16;
     if (cap < ncap) {
         cap = ncap;
     } else {
@@ -570,7 +570,8 @@ uint64_t hashmap_sip(const void *data, size_t len,
 
 // hashmap_murmur returns a hash value for `data` using Murmur3_86_128.
 uint64_t hashmap_murmur(const void *data, size_t len, 
-                        uint64_t seed0, uint64_t seed1)
+                        uint64_t seed0, 
+                        __attribute__((unused)) uint64_t seed1)
 {
     char out[16];
     MM86128(data, len, seed0, &out);

@@ -1329,6 +1329,7 @@ fsrv_run_result_t afl_fsrv_run_target(afl_forkserver_t *fsrv, u32 timeout,
   fsrv->total_execs++;
 
 #ifdef OUTPUT_DIVERSITY
+
 #define BUF_SIZE 4096
   char buf[BUF_SIZE];
   int overlap = 20; // maybe the input is split between 2 pages, 
@@ -1363,6 +1364,7 @@ fsrv_run_result_t afl_fsrv_run_target(afl_forkserver_t *fsrv, u32 timeout,
     // copy the last bytes back to the beginning of the new page
     memcpy(buf, buf + BUF_SIZE - overlap, overlap);
   } while(1);
+
 #endif
 
   /* Any subsequent operations on fsrv->trace_bits must not be moved by the

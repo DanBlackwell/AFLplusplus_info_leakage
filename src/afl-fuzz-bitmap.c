@@ -24,8 +24,10 @@
  */
 
 #include "afl-fuzz.h"
-#include "hashfuzz.h"
-#include "hashmap.h"
+#ifdef HASHFUZZ
+  #include "hashfuzz.h"
+  #include "hashmap.h"
+#endif
 #include <limits.h>
 #if !defined NAME_MAX
   #define NAME_MAX _XOPEN_NAME_MAX
@@ -453,6 +455,7 @@ void write_crash_readme(afl_state_t *afl) {
 
 }
 
+#ifdef HASHFUZZ
 
 // Return the number of partitions found for this checksum before this one
 s8 check_if_new_partition(u64 checksum, u8 partition) {
@@ -485,47 +488,7 @@ s8 check_if_new_partition(u64 checksum, u8 partition) {
   return 0;
 }
 
-/*
-
-  // TODO: O(n) lookup is awful - at least sort the inputs so you can binary search on checksum...
-  for (u32 i = 0; i < hashfuzzFoundPartitionsFilled; i++) {
-    // If we've found an input that reaches this path
-    if (hashfuzzFoundPartitions[i].checksum == checksum) {
-      if (hashfuzzFoundPartitions[i].foundPartitions & partitionBitmap) {
-//	printf("Found identical partition %03hhu for checksum %015llu\n", partition, checksum);
-        // We've already found an input in this partition
-        return -1;
-      } else {
-        // This input discovers a new partition for this path
-        u8 foundAlready = hashfuzzFoundPartitions[i].foundPartitionsCount;
-	printf("Found new partition %03hhu for checksum %015llu\n", partition, checksum);
-
-        hashfuzzFoundPartitions[i].foundPartitions |= partitionBitmap;
-        hashfuzzFoundPartitions[i].foundPartitionsCount++;
-        return foundAlready;
-      }
-    }
-  }
-
-  if (hashfuzzFoundPartitionsFilled + 1 >= hashfuzzFoundPartitionsLen) {
-    hashfuzzFoundPartitionsLen *= 2;
-    size_t newSize = sizeof(struct path_partitions) * hashfuzzFoundPartitionsLen;
-    hashfuzzFoundPartitions = ck_realloc(hashfuzzFoundPartitions, newSize);
-                                         
-    if (!hashfuzzFoundPartitions) {
-      perror("malloc failed!");
-      return -1;
-    }
-  }
-
-  printf("Found checksum %015llu with partition %03hhu\n", checksum, partition);
-  hashfuzzFoundPartitions[hashfuzzFoundPartitionsFilled] = 
-      (struct path_partitions){ checksum, partitionBitmap, 1 };
-  hashfuzzFoundPartitionsFilled++;
-
-  return 0;
-}
-*/
+#endif
 
 
 /* Check if the result of an execve() during routine fuzzing is interesting,
@@ -561,7 +524,6 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
   }
 
   if (likely(fault == afl->crash_mode)) {
-
     u8 interesting = 0;
 
     /* Keep only if there are new bits in the map, add to queue for
@@ -570,11 +532,12 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     new_bits = has_new_bits_unclassified(afl, afl->virgin_bits);
     interesting = new_bits;
 
-#ifdef OUTPUT_DIVERSITY
+#ifdef HASHFUZZ
+  #ifdef OUTPUT_DIVERSITY
     u8 hashfuzzClass = afl->fsrv.last_run_output_hash_class;
-#else
+  #else
     u8 hashfuzzClass = hashfuzzClassify(mem, len, afl->hashfuzz_partitions);
-#endif
+  #endif
 
     cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
 
@@ -598,6 +561,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
         interesting = interesting || (new_partition >= 0); // We don't have this one in the queue yet
     }
+#endif
 
     if (likely(!interesting)) {
 
@@ -624,7 +588,11 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", queue_fn); }
     ck_write(fd, mem, len, queue_fn);
     close(fd);
+#ifdef HASHFUZZ
     add_to_queue(afl, queue_fn, len, 0, hashfuzzClass, cksum, new_partition);
+#else
+    add_to_queue(afl, queue_fn, len, 0);
+#endif
 
 #ifdef INTROSPECTION
     if (afl->custom_mutators_count && afl->current_custom_fuzz) {

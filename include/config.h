@@ -71,6 +71,12 @@
 /* Maximum allowed fails per CMP value. Default: 128 */
 #define CMPLOG_FAIL_MAX 96
 
+
+#define OUTPUT_DIVERSITY
+#ifdef OUTPUT_DIVERSITY
+  #define HASHFUZZ
+#endif
+
 /* -------------------------------------*/
 /* Now non-cmplog configuration options */
 /* -------------------------------------*/

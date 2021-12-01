@@ -50,7 +50,6 @@ typedef struct afl_forkserver {
       dev_null_fd,                      /* Persistent fd for /dev/null      */
       fsrv_ctl_fd,                      /* Fork server control pipe (write) */
       fsrv_st_fd;                       /* Fork server status pipe (read)   */
-#define OUTPUT_DIVERSITY
 #ifdef OUTPUT_DIVERSITY
   s32 fsrv_stdout_fd;                   /* fd for monitoring child's stdout */
   u8  last_run_output_hash_class;       /* store the hashfuzz class for last input */
