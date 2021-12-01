@@ -52,7 +52,8 @@ typedef struct afl_forkserver {
       fsrv_st_fd;                       /* Fork server status pipe (read)   */
 #define OUTPUT_DIVERSITY
 #ifdef OUTPUT_DIVERSITY
-  s32 fsrv_stdout_fd;
+  s32 fsrv_stdout_fd;                   /* fd for monitoring child's stdout */
+  u8  last_run_output_hash_class;       /* store the hashfuzz class for last input */
 #endif
 
   u32 exec_tmout;                       /* Configurable exec timeout (ms)   */

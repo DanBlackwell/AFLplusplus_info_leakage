@@ -570,7 +570,11 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     new_bits = has_new_bits_unclassified(afl, afl->virgin_bits);
     interesting = new_bits;
 
+#ifdef OUTPUT_DIVERSITY
+    u8 hashfuzzClass = afl->fsrv.last_run_output_hash_class;
+#else
     u8 hashfuzzClass = hashfuzzClassify(mem, len, afl->hashfuzz_partitions);
+#endif
 
     cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
 

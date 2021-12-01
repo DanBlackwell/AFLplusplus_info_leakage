@@ -30,6 +30,8 @@
 #define AFL_MAIN
 #define MESSAGES_TO_STDOUT
 
+#define OUTPUT_DIVERSITY
+
 #ifndef _GNU_SOURCE
   #define _GNU_SOURCE 1
 #endif

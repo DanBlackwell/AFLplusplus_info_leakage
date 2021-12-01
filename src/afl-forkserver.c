@@ -1328,16 +1328,17 @@ fsrv_run_result_t afl_fsrv_run_target(afl_forkserver_t *fsrv, u32 timeout,
 
   fsrv->total_execs++;
 
-#define OUTPUT_DIVERSITY
 #ifdef OUTPUT_DIVERSITY
 #define BUF_SIZE 4096
   char buf[BUF_SIZE];
-  int overlap = 40; // maybe the input is split between 2 pages, 
+  int overlap = 20; // maybe the input is split between 2 pages, 
                      // eg read1: '...<HFC', read2: 'LASS:4>...'
   memset(buf, 'X', overlap);
 
   char *bufStart = buf + overlap;
   int readLen = BUF_SIZE - overlap;
+
+  fsrv->last_run_output_hash_class = 0;
 
   // TODO: no reason not to fseek to the end of the pipe and read backwards
   // First read is special - can start from 0
@@ -1349,9 +1350,9 @@ fsrv_run_result_t afl_fsrv_run_target(afl_forkserver_t *fsrv, u32 timeout,
     char *sought = "<HFCLASS:";
     char *p = findLast(buf, sought);
     if (p) {
-      u8 class;
-      sscanf(p + strlen(sought), "%hhu", &class);
-      // printf("Hashfuzz class updated to %hhu\n", class);
+      sscanf(p + strlen(sought), "%hhu", &fsrv->last_run_output_hash_class);
+      // printf("Hashfuzz class updated to %hhu\n", 
+      //        fsrv->last_run_output_hash_class);
     }
 
     if (len < readLen) break;
