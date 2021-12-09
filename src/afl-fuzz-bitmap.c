@@ -389,7 +389,7 @@ u8 *describe_op(afl_state_t *afl, u8 new_bits, u8 new_partition, size_t max_desc
   }
 
   if (new_bits == 2) { strcat(ret, ",+cov"); }
-  else if (new_partition) { strcat(ret, "+partition"); }
+  else if (new_bits == 0 && new_partition) { strcat(ret, "+partition"); }
 
   if (unlikely(strlen(ret) >= max_description_len))
     FATAL("describe string is too long");
