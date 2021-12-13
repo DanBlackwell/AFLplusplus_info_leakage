@@ -543,7 +543,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
     bool matchesPathInQueue = false;
     if (likely(!interesting)) {
-	struct queue_entry *q;
+	      struct queue_entry *q;
         for (u32 i = 0; i < afl->queued_paths; i++) {
             q = afl->queue_buf[i];
             if (q->exec_cksum == cksum) {
