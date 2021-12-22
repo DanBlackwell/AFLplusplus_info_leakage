@@ -434,11 +434,7 @@ static u8 check_if_text(afl_state_t *afl, struct queue_entry *q) {
 
 /* Append new test case to the queue. */
 
-#ifdef HASHFUZZ
 void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det, u8 hashfuzzClass, u64 cksum, u8 discoveryOrder) {
-#else 
-void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det) {
-#endif
 
   struct queue_entry *q = ck_alloc(sizeof(struct queue_entry));
 
@@ -449,39 +445,39 @@ void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det) {
   q->trace_mini = NULL;
   q->testcase_buf = NULL;
   q->mother = afl->queue_cur;
-#ifdef HASHFUZZ
-  q->hashfuzzClass = hashfuzzClass;
-  q->exec_cksum = cksum;
-  q->discoveryOrder = discoveryOrder;
-  q->disabled = false;
 
-  // We'll use this to add an input for each partition during the initial run -
-  // it emulates the original program transformation (one seed added per partition)
-  static u64 discoveredPartitions = 0;
+  if (afl->hashfuzz_enabled) {
+    q->hashfuzzClass = hashfuzzClass;
+    q->exec_cksum = cksum;
+    q->discoveryOrder = discoveryOrder;
+    q->disabled = false;
 
-  u64 partitionBit = 1 << hashfuzzClass;
-  if (!(partitionBit & discoveredPartitions)) {
-    // enable this seed if it's the first one for that partition
-    printf("Adding (and enabling) first seed for partition %hhu\n", hashfuzzClass);
-    discoveredPartitions |= partitionBit;
-    q->disabled = false;
-  #ifdef ORIGINAL_HASHFUZZ_MIMIC
-  } else if (discoveryOrder == 0) {
-    q->disabled = false;
-  } else {
-    printf("Discarding new queue entry, as running under ORIGINAL_HASHFUZZ_MIMIC\n");
-    ck_free(q);
-    return;
-  }
-  #else
-  } else if (discoveryOrder != 0 && afl->queue_cycle % discoveryOrder == 0) {
-    // Disable this input if we are not on that cycle parity
-    q->disabled = true;
-    printf("disabling %020llu as it is discovery num %d, and we are on queue cycle :%llu\n", cksum, discoveryOrder, afl->queue_cycle);
-  }
-  #endif
+    // We'll use this to add an input for each partition during the initial run -
+    // it emulates the original program transformation (one seed added per partition)
+    static u64 discoveredPartitions = 0;
+
+    u64 partitionBit = 1 << hashfuzzClass;
+    if (!(partitionBit & discoveredPartitions)) {
+      // enable this seed if it's the first one for that partition
+      printf("Adding (and enabling) first seed for partition %hhu\n", hashfuzzClass);
+      discoveredPartitions |= partitionBit;
+      q->disabled = false;
+#ifdef ORIGINAL_HASHFUZZ_MIMIC
+    } else if (discoveryOrder == 0) {
+      q->disabled = false;
+    } else {
+      printf("Discarding new queue entry, as running under ORIGINAL_HASHFUZZ_MIMIC\n");
+      ck_free(q);
+      return;
+    }
+#else 
+    } else if (discoveryOrder != 0 && afl->queue_cycle % discoveryOrder == 0) {
+      // Disable this input if we are not on that cycle parity
+      q->disabled = true;
+      printf("disabling %020llu as it is discovery num %d, and we are on queue cycle :%llu\n", cksum, discoveryOrder, afl->queue_cycle);
+    }
 #endif
-
+  }
 
 #ifdef INTROSPECTION
   q->bitsmap_size = afl->bitsmap_size;

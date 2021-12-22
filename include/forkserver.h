@@ -49,11 +49,10 @@ typedef struct afl_forkserver {
 
       dev_null_fd,                      /* Persistent fd for /dev/null      */
       fsrv_ctl_fd,                      /* Fork server control pipe (write) */
-      fsrv_st_fd;                       /* Fork server status pipe (read)   */
-#ifdef OUTPUT_DIVERSITY
-  s32 fsrv_stdout_fd;                   /* fd for monitoring child's stdout */
+      fsrv_st_fd,                       /* Fork server status pipe (read)   */
+      fsrv_stdout_fd;                   /* fd for monitoring child's stdout */
   u8  last_run_output_hash_class;       /* store the hashfuzz class for last input */
-#endif
+  bool hashfuzz_output_based;           /* Are we running hashfuzz over outputs? */
 
   u32 exec_tmout;                       /* Configurable exec timeout (ms)   */
   u32 init_tmout;                       /* Configurable init timeout (ms)   */

@@ -101,9 +101,10 @@ static void usage(u8 *argv0, int more_help) {
       "Required parameters:\n"
       "  -i dir        - input directory with test cases\n"
       "  -o dir        - output directory for fuzzer findings\n\n"
-#ifdef HASHFUZZ
-      "  -H partitions - number of hashfuzz partitions to use\n\n"
-#endif
+
+      "Hashfuzz settings:\n"
+      "  -H i/o        - enable hashfuzz over 'input'/'output'\n"
+      "  -P partitions - Hashfuzz partitions (must be a power of 2)\n\n"
 
       "Execution control settings:\n"
       "  -p schedule   - power schedules compute a seed's performance score:\n"
@@ -422,19 +423,20 @@ int main(int argc, char **argv_orig, char **envp) {
   afl->debug = debug;
   afl_fsrv_init(&afl->fsrv);
   if (debug) { afl->fsrv.debug = true; }
+  if (afl->hashfuzz_enabled && !afl->hashfuzz_is_input_based) { 
+    afl->fsrv.hashfuzz_output_based = true; 
+  }
   read_afl_environment(afl, envp);
   if (afl->shm.map_size) { afl->fsrv.map_size = afl->shm.map_size; }
   exit_1 = !!afl->afl_env.afl_bench_just_one;
 
-#ifdef HASHFUZZ
-  afl->hashfuzz_partitions = 0;
-  hashfuzzFoundPartitions = hashmap_new_with_allocator(ck_alloc, ck_realloc, ck_free,
-		  sizeof(struct path_partitions), 0, 0, 0,
-		  path_partitions_hash, path_partitions_compare,
-		  NULL, NULL);
-//  hashfuzzFoundPartitions = hashmap_new(sizeof(struct path_partitions), 0, 0, 0,
-//		  path_partitions_hash, path_partitions_compare, NULL, NULL);
-#endif
+  if (afl->hashfuzz_enabled) {
+    afl->hashfuzz_partitions = 0;
+    hashfuzzFoundPartitions = hashmap_new_with_allocator(ck_alloc, ck_realloc, ck_free,
+        sizeof(struct path_partitions), 0, 0, 0,
+        path_partitions_hash, path_partitions_compare,
+        NULL, NULL);
+  }
 
   SAYF(cCYA "afl-fuzz" VERSION cRST
             " based on afl by Michal Zalewski and a large online community\n");
@@ -448,7 +450,7 @@ int main(int argc, char **argv_orig, char **envp) {
 
   while ((opt = getopt(
               argc, argv,
-              "+b:B:c:CdDe:E:hH:i:I:f:F:l:L:m:M:nNOo:p:RQs:S:t:T:UV:Wx:Z")) > 0) {
+              "+b:B:c:CdDe:E:hH:i:I:f:F:l:L:m:M:nNOo:P:p:RQs:S:t:T:UV:Wx:Z")) > 0) {
 
     switch (opt) {
 
@@ -1103,21 +1105,40 @@ int main(int argc, char **argv_orig, char **envp) {
 
       } break;
 
-#ifdef HASHFUZZ
       case 'H': {                                                /* hashfuzz */
 
+        char c;
         if (!optarg ||
-            sscanf(optarg, "%hhu", &afl->hashfuzz_partitions) < 1 ||
-            optarg[0] == '-') {
+            sscanf(optarg, "%c", &c) < 1 ||
+            optarg[1] != '\0' ||
+            (c != 'i' && c != 'o')) {
 
-          FATAL("Bad syntax used for -t");
+          FATAL("Bad syntax used for -H (expected 'i' for input, 'o' for output)");
 
         }
+
+        afl->hashfuzz_enabled = true;
+        afl->hashfuzz_is_input_based = (c == 'i');
 
         break;
 
       }
-#endif
+
+      case 'P': {
+        u8 p;
+
+        if (!optarg || 
+            sscanf(optarg, "%hhu", &p) < 1 || 
+            (p != 1 && p != 2 && p != 4 && p != 8 && p != 16 && p != 32 && p != 64)) {
+
+          FATAL("Bad syntax used for -P (expected a power of 2 upto 64 e.g. '-P 16')");
+
+        }
+
+        afl->hashfuzz_partitions = p;
+
+        break;
+      }
 
       case 'h':
         show_help++;
@@ -1138,14 +1159,17 @@ int main(int argc, char **argv_orig, char **envp) {
 
   }
 
-#ifdef HASHFUZZ
-  if (optind == argc || !afl->hashfuzz_partitions || !afl->in_dir || !afl->out_dir || show_help) {
-#else
+
   if (optind == argc || !afl->in_dir || !afl->out_dir || show_help) {
-#endif
 
     usage(argv[0], show_help);
 
+  }
+
+  if (afl->hashfuzz_enabled && !afl->hashfuzz_partitions) {
+
+    FATAL("If using hashfuzz (-H), you must also specify the number of partitions with -P");
+    
   }
 
   if (unlikely(afl->afl_env.afl_persistent_record)) {
@@ -1992,52 +2016,52 @@ int main(int argc, char **argv_orig, char **envp) {
 
   while (likely(!afl->stop_soon)) {
 
-#ifdef HASHFUZZ
-    static u32 lastCycle = 1;
-    if (afl->queue_cycle != lastCycle) {
-	      lastCycle = afl->queue_cycle;
-#ifdef ORIGINAL_HASHFUZZ_MIMIC
-        u64 partitionAdded = 0;
-        printf("ORIGINAL HASHFUZZ MIMIC: BEGINNING NEW QUEUE CYCLE %llu\n", afl->queue_cycle);
-#else
-        printf("BEGINNING NEW QUEUE CYCLE %llu\n", afl->queue_cycle);
-#endif
-        // Every queue cycle, swap in inputs from a different hashfuzz partition for each path
-        for (u32 i = 0; i < afl->queued_paths; i++) {
-            struct queue_entry *q = afl->queue_buf[i];
+    if (afl->hashfuzz_enabled) {
+      static u32 lastCycle = 1;
+      if (afl->queue_cycle != lastCycle) {
+          lastCycle = afl->queue_cycle;
+  #ifdef ORIGINAL_HASHFUZZ_MIMIC
+          u64 partitionAdded = 0;
+          printf("ORIGINAL HASHFUZZ MIMIC: BEGINNING NEW QUEUE CYCLE %llu\n", afl->queue_cycle);
+  #else
+          printf("BEGINNING NEW QUEUE CYCLE %llu\n", afl->queue_cycle);
+  #endif
+          // Every queue cycle, swap in inputs from a different hashfuzz partition for each path
+          for (u32 i = 0; i < afl->queued_paths; i++) {
+              struct queue_entry *q = afl->queue_buf[i];
 
-            // Find the corresponding path_partition entry
-	          struct path_partitions sought = { .checksum = q->exec_cksum };
-	          struct path_partitions *found = hashmap_get(hashfuzzFoundPartitions, &sought);
+              // Find the corresponding path_partition entry
+              struct path_partitions sought = { .checksum = q->exec_cksum };
+              struct path_partitions *found = hashmap_get(hashfuzzFoundPartitions, &sought);
 
-	          if (!found) {
-		            printf("WTFFFF failed to find path_partition with checksum %020llu\n", q->exec_cksum);
-	          } else {
-#ifdef ORIGINAL_HASHFUZZ_MIMIC
-                if (!(partitionAdded & (1 << q->hashfuzzClass))) {
-                  q->disabled = false;
-                  partitionAdded |= (1 << q->hashfuzzClass);
-                } else {
-                  q->disabled = q->discoveryOrder != 0;
-                }
-#else
-                // Only enable one input per path for each queue cycle
-                q->disabled = afl->queue_cycle % found->foundPartitionsCount != q->discoveryOrder;
-#endif
-                printf("[%04d] cksum: %020llu, foundPartitionsCount: %d, partition: %03u, discoveryOrder: %d, enabled: %d\n", 
-			                 i,
-			                 q->exec_cksum, 
-                       found->foundPartitionsCount,
-            	  	     q->hashfuzzClass,
-            	  	     q->discoveryOrder,
-            	  	     !(q->disabled));
-            }
-        }
+              if (!found) {
+                  printf("WTFFFF failed to find path_partition with checksum %020llu\n", q->exec_cksum);
+              } else {
+  #ifdef ORIGINAL_HASHFUZZ_MIMIC
+                  if (!(partitionAdded & (1 << q->hashfuzzClass))) {
+                    q->disabled = false;
+                    partitionAdded |= (1 << q->hashfuzzClass);
+                  } else {
+                    q->disabled = q->discoveryOrder != 0;
+                  }
+  #else
+                  // Only enable one input per path for each queue cycle
+                  q->disabled = afl->queue_cycle % found->foundPartitionsCount != q->discoveryOrder;
+  #endif
+                  printf("[%04d] cksum: %020llu, foundPartitionsCount: %d, partition: %03u, discoveryOrder: %d, enabled: %d\n", 
+                        i,
+                        q->exec_cksum, 
+                        found->foundPartitionsCount,
+                        q->hashfuzzClass,
+                        q->discoveryOrder,
+                        !(q->disabled));
+              }
+          }
+      }
+
+      // We have changed the enabled entries - need to rebuild the alias probability table
+      afl->reinit_table = 1;
     }
-
-    // We have changed the enabled entries - need to rebuild the alias probability table
-    afl->reinit_table = 1;
-#endif
 
     cull_queue(afl);
 

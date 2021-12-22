@@ -361,9 +361,7 @@ void afl_fsrv_start(afl_forkserver_t *fsrv, char **argv,
                     volatile u8 *stop_soon_p, u8 debug_child_output) {
 
   int   st_pipe[2], ctl_pipe[2];
-#ifdef OUTPUT_DIVERSITY
-  int stdout_pipe[2];
-#endif
+  int   stdout_pipe[2];
   s32   status;
   s32   rlen;
   char *ignore_autodict = getenv("AFL_NO_AUTODICT");
@@ -403,9 +401,9 @@ void afl_fsrv_start(afl_forkserver_t *fsrv, char **argv,
   }
 
   if (pipe(st_pipe) || pipe(ctl_pipe)) { PFATAL("pipe() failed"); }
-#ifdef OUTPUT_DIVERSITY
-  if (pipe(stdout_pipe)) { PFATAL("pipe() stdout failed"); }
-#endif
+  if (fsrv->hashfuzz_output_based) { 
+    if (pipe(stdout_pipe)) { PFATAL("pipe() stdout failed"); } 
+  }
 
   fsrv->last_run_timed_out = 0;
   fsrv->fsrv_pid = fork();
@@ -470,17 +468,17 @@ void afl_fsrv_start(afl_forkserver_t *fsrv, char **argv,
 
     setsid();
 
-#ifdef OUTPUT_DIVERSITY
-    dup2(stdout_pipe[1], 1);
-    dup2(fsrv->dev_null_fd, 2);
-#else
-    if (!(debug_child_output)) {
+    if (fsrv->hashfuzz_output_based) {
+
+      dup2(stdout_pipe[1], 1);
+      dup2(fsrv->dev_null_fd, 2);
+
+    } else if (!(debug_child_output)) {
 
       dup2(fsrv->dev_null_fd, 1);
       dup2(fsrv->dev_null_fd, 2);
 
     }
-#endif
 
     if (!fsrv->use_stdin) {
 
@@ -502,9 +500,9 @@ void afl_fsrv_start(afl_forkserver_t *fsrv, char **argv,
     close(ctl_pipe[1]);
     close(st_pipe[0]);
     close(st_pipe[1]);
-  #ifdef OUTPUT_DIVERSITY
-    close(stdout_pipe[0]);
-  #endif
+    if (fsrv->hashfuzz_output_based) {
+      close(stdout_pipe[0]);
+    }
 
     close(fsrv->out_dir_fd);
     close(fsrv->dev_null_fd);
@@ -614,10 +612,10 @@ void afl_fsrv_start(afl_forkserver_t *fsrv, char **argv,
   fsrv->fsrv_ctl_fd = ctl_pipe[1];
   fsrv->fsrv_st_fd = st_pipe[0];
 
-#ifdef OUTPUT_DIVERSITY
-  close(stdout_pipe[1]);
-  fsrv->fsrv_stdout_fd = stdout_pipe[0];
-#endif
+  if (fsrv->hashfuzz_output_based) {
+    close(stdout_pipe[1]);
+    fsrv->fsrv_stdout_fd = stdout_pipe[0];
+  }
 
   /* Wait for the fork server to come up, but don't wait too long. */
 
@@ -1328,44 +1326,44 @@ fsrv_run_result_t afl_fsrv_run_target(afl_forkserver_t *fsrv, u32 timeout,
 
   fsrv->total_execs++;
 
-#ifdef OUTPUT_DIVERSITY
+  if (fsrv->hashfuzz_output_based) {
 
 #define BUF_SIZE 4096
-  char buf[BUF_SIZE];
-  int overlap = 20; // maybe the input is split between 2 pages, 
-                     // eg read1: '...<HFC', read2: 'LASS:4>...'
-  memset(buf, 'X', overlap);
+    char buf[BUF_SIZE];
+    int overlap = 20; // maybe the input is split between 2 pages, 
+                      // eg read1: '...<HFC', read2: 'LASS:4>...'
+    memset(buf, 'X', overlap);
 
-  char *bufStart = buf + overlap;
-  int readLen = BUF_SIZE - overlap;
+    char *bufStart = buf + overlap;
+    int readLen = BUF_SIZE - overlap;
 
-  fsrv->last_run_output_hash_class = 0;
+    fsrv->last_run_output_hash_class = 0;
 
-  // TODO: no reason not to fseek to the end of the pipe and read backwards
-  // First read is special - can start from 0
-  ssize_t len = read(fsrv->fsrv_stdout_fd, buf, BUF_SIZE);
-  buf[len] = 0;
-  do {
-    // printf("Read in: %s\n", buf);
+    // TODO: no reason not to fseek to the end of the pipe and read backwards
+    // First read is special - can start from 0
+    ssize_t len = read(fsrv->fsrv_stdout_fd, buf, BUF_SIZE);
+    buf[len] = 0;
+    do {
+      // printf("Read in: %s\n", buf);
 
-    char *sought = "<HFCLASS:";
-    char *p = findLast(buf, sought);
-    if (p) {
-      sscanf(p + strlen(sought), "%hhu", &fsrv->last_run_output_hash_class);
-      // printf("Hashfuzz class updated to %hhu\n", 
-      //        fsrv->last_run_output_hash_class);
-    }
+      char *sought = "<HFCLASS:";
+      char *p = findLast(buf, sought);
+      if (p) {
+        sscanf(p + strlen(sought), "%hhu", &fsrv->last_run_output_hash_class);
+        // printf("Hashfuzz class updated to %hhu\n", 
+        //        fsrv->last_run_output_hash_class);
+      }
 
-    if (len < readLen) break;
+      if (len < readLen) break;
 
-    len = read(fsrv->fsrv_stdout_fd, bufStart, readLen);
-    *(bufStart + len) = 0;
+      len = read(fsrv->fsrv_stdout_fd, bufStart, readLen);
+      *(bufStart + len) = 0;
 
-    // copy the last bytes back to the beginning of the new page
-    memcpy(buf, buf + BUF_SIZE - overlap, overlap);
-  } while(1);
+      // copy the last bytes back to the beginning of the new page
+      memcpy(buf, buf + BUF_SIZE - overlap, overlap);
+    } while(1);
 
-#endif
+  }
 
   /* Any subsequent operations on fsrv->trace_bits must not be moved by the
      compiler below this point. Past this location, fsrv->trace_bits[]

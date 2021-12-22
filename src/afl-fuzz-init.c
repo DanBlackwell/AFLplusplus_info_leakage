@@ -771,14 +771,9 @@ void read_testcases(afl_state_t *afl, u8 *directory) {
 
       if (!access(dfn, F_OK)) { passed_det = 1; }
 
-#ifdef HASHFUZZ
       // Start with hashfuzz partition = 0, during the dry runs it will be set
       add_to_queue(afl, fn2, st.st_size >= MAX_FILE ? MAX_FILE : st.st_size,
                    passed_det, 0, 0, 0);
-#else
-      add_to_queue(afl, fn2, st.st_size >= MAX_FILE ? MAX_FILE : st.st_size,
-                   passed_det);
-#endif
 
       if (unlikely(afl->shm.cmplog_mode)) {
 
@@ -898,9 +893,9 @@ void perform_dry_run(afl_state_t *afl) {
 
     close(fd);
 
-#ifdef HASHFUZZ
-    q->hashfuzzClass = hashfuzzClassify(use_mem, read_len, afl->hashfuzz_partitions);
-#endif
+    if (afl->hashfuzz_enabled && afl->hashfuzz_is_input_based) {
+      q->hashfuzzClass = hashfuzzClassify(use_mem, read_len, afl->hashfuzz_partitions);
+    }
 
     res = calibrate_case(afl, q, use_mem, 0, 1);
 
@@ -1162,9 +1157,9 @@ void perform_dry_run(afl_state_t *afl) {
     q = afl->queue_buf[idx];
     if (!q || q->disabled || q->cal_failed || !q->exec_cksum) { continue; }
 
-#ifdef HASHFUZZ
-    check_if_new_partition(q->exec_cksum, q->hashfuzzClass);
-#endif
+    if (afl->hashfuzz_enabled) {
+      check_if_new_partition(q->exec_cksum, q->hashfuzzClass);
+    }
 
     u32 done = 0;
     for (i = idx + 1;

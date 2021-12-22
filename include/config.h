@@ -72,15 +72,8 @@
 #define CMPLOG_FAIL_MAX 96
 
 
-//#define OUTPUT_DIVERSITY
-//#ifdef OUTPUT_DIVERSITY
-//  #define HASHFUZZ
-//#endif
-//
 #define ORIGINAL_HASHFUZZ_MIMIC
-#ifdef ORIGINAL_HASHFUZZ_MIMIC
-  #define HASHFUZZ
-#endif
+
 
 /* -------------------------------------*/
 /* Now non-cmplog configuration options */

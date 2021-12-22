@@ -455,7 +455,6 @@ void write_crash_readme(afl_state_t *afl) {
 
 }
 
-#ifdef HASHFUZZ
 
 // Return the number of partitions found for this checksum before this one
 s8 check_if_new_partition(u64 checksum, u8 partition) {
@@ -487,8 +486,6 @@ s8 check_if_new_partition(u64 checksum, u8 partition) {
 
   return 0;
 }
-
-#endif
 
 
 /* Check if the result of an execve() during routine fuzzing is interesting,
@@ -525,52 +522,56 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
   if (likely(fault == afl->crash_mode)) {
     u8 interesting = 0;
+    u8 hashfuzzClass = 0;
 
     /* Keep only if there are new bits in the map, add to queue for
        future fuzzing, etc. */
 
     new_bits = has_new_bits_unclassified(afl, afl->virgin_bits);
     interesting = new_bits;
+    
+    if (afl->hashfuzz_enabled) {
+      if (afl->hashfuzz_is_input_based) {
+        hashfuzzClass = hashfuzzClassify(mem, len, afl->hashfuzz_partitions);
+      } else {
+        hashfuzzClass = afl->fsrv.last_run_output_hash_class;
+      }
 
-#ifdef HASHFUZZ
-  #ifdef OUTPUT_DIVERSITY
-    u8 hashfuzzClass = afl->fsrv.last_run_output_hash_class;
-  #else
-    u8 hashfuzzClass = hashfuzzClassify(mem, len, afl->hashfuzz_partitions);
-  #endif
+      cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
 
-    cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
+      bool matchesPathInQueue = false;
+      if (likely(!interesting)) {
+          struct queue_entry *q;
+          for (u32 i = 0; i < afl->queued_paths; i++) {
+              q = afl->queue_buf[i];
+              if (q->exec_cksum == cksum) {
+                  matchesPathInQueue = true;
+                  break;
+              }
+          }
+      }
 
-    bool matchesPathInQueue = false;
-    if (likely(!interesting)) {
-	      struct queue_entry *q;
-        for (u32 i = 0; i < afl->queued_paths; i++) {
-            q = afl->queue_buf[i];
-            if (q->exec_cksum == cksum) {
-                matchesPathInQueue = true;
-                break;
-            }
-        }
+      if (matchesPathInQueue || interesting) {
+          // Find out if we have a matching path with this hashfuzz classification
+          // IMPORTANT: this needs calling even for new inputs 
+          //            (to build the map of covered partitions)
+          new_partition = check_if_new_partition(cksum, hashfuzzClass);
+
+          interesting = interesting || (new_partition >= 0); // We don't have this one in the queue yet
+      }
+
+    } else { /*hashfuzz not enabled */
+
+      if (likely(!interesting)) {
+
+        if (unlikely(afl->crash_mode)) { ++afl->total_crashes; }
+        return 0;
+
+      }
+
+      classified = new_bits;
+
     }
-
-    if (matchesPathInQueue || interesting) {
-        // Find out if we have a matching path with this hashfuzz classification
-        // IMPORTANT: this needs calling even for new inputs 
-        //            (to build the map of covered partitions)
-        new_partition = check_if_new_partition(cksum, hashfuzzClass);
-
-        interesting = interesting || (new_partition >= 0); // We don't have this one in the queue yet
-    }
-#endif
-
-    if (likely(!interesting)) {
-
-      if (unlikely(afl->crash_mode)) { ++afl->total_crashes; }
-      return 0;
-
-    }
-
-    classified = new_bits;
 
 #ifndef SIMPLE_FILES
 
@@ -588,11 +589,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", queue_fn); }
     ck_write(fd, mem, len, queue_fn);
     close(fd);
-#ifdef HASHFUZZ
     add_to_queue(afl, queue_fn, len, 0, hashfuzzClass, cksum, new_partition);
-#else
-    add_to_queue(afl, queue_fn, len, 0);
-#endif
 
 #ifdef INTROSPECTION
     if (afl->custom_mutators_count && afl->current_custom_fuzz) {
