@@ -39,7 +39,7 @@ u8 hashfuzzClassify(const u8* input, u32 len, u8 partitions) {
     static u8 partitionBoundaries[8];
     static u8 initialised = 0;
     static u8 sampled[256];
-
+    
     assert(partitions <= 64);
 
     // No need to classify if there's only one partition

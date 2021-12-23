@@ -72,7 +72,7 @@
 #define CMPLOG_FAIL_MAX 96
 
 
-#define ORIGINAL_HASHFUZZ_MIMIC
+// #define ORIGINAL_HASHFUZZ_MIMIC
 
 
 /* -------------------------------------*/

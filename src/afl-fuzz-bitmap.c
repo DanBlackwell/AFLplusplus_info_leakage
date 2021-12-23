@@ -24,10 +24,8 @@
  */
 
 #include "afl-fuzz.h"
-#ifdef HASHFUZZ
-  #include "hashfuzz.h"
-  #include "hashmap.h"
-#endif
+#include "hashfuzz.h"
+#include "hashmap.h"
 #include <limits.h>
 #if !defined NAME_MAX
   #define NAME_MAX _XOPEN_NAME_MAX
@@ -531,6 +529,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     interesting = new_bits;
     
     if (afl->hashfuzz_enabled) {
+      
       if (afl->hashfuzz_is_input_based) {
         hashfuzzClass = hashfuzzClassify(mem, len, afl->hashfuzz_partitions);
       } else {
@@ -560,18 +559,17 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
           interesting = interesting || (new_partition >= 0); // We don't have this one in the queue yet
       }
 
-    } else { /*hashfuzz not enabled */
+    }
 
-      if (likely(!interesting)) {
+    if (likely(!interesting)) {
 
-        if (unlikely(afl->crash_mode)) { ++afl->total_crashes; }
-        return 0;
-
-      }
-
-      classified = new_bits;
+      if (unlikely(afl->crash_mode)) { ++afl->total_crashes; }
+      return 0;
 
     }
+
+    classified = new_bits;
+
 
 #ifndef SIMPLE_FILES
 

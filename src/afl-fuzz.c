@@ -430,14 +430,6 @@ int main(int argc, char **argv_orig, char **envp) {
   if (afl->shm.map_size) { afl->fsrv.map_size = afl->shm.map_size; }
   exit_1 = !!afl->afl_env.afl_bench_just_one;
 
-  if (afl->hashfuzz_enabled) {
-    afl->hashfuzz_partitions = 0;
-    hashfuzzFoundPartitions = hashmap_new_with_allocator(ck_alloc, ck_realloc, ck_free,
-        sizeof(struct path_partitions), 0, 0, 0,
-        path_partitions_hash, path_partitions_compare,
-        NULL, NULL);
-  }
-
   SAYF(cCYA "afl-fuzz" VERSION cRST
             " based on afl by Michal Zalewski and a large online community\n");
 
@@ -1283,6 +1275,13 @@ int main(int argc, char **argv_orig, char **envp) {
           "fuzzing the right binary: " cRST "%s",
           argv[optind]);
 
+  }
+
+  if (afl->hashfuzz_enabled) {
+    hashfuzzFoundPartitions = hashmap_new_with_allocator(ck_alloc, ck_realloc, ck_free,
+        sizeof(struct path_partitions), 0, 0, 0,
+        path_partitions_hash, path_partitions_compare,
+        NULL, NULL);
   }
 
   ACTF("Getting to work...");
