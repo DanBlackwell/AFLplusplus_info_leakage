@@ -104,7 +104,9 @@ static void usage(u8 *argv0, int more_help) {
 
       "Hashfuzz settings:\n"
       "  -H i/o        - enable hashfuzz over 'input'/'output'\n"
-      "  -P partitions - Hashfuzz partitions (must be a power of 2)\n\n"
+      "  -P partitions - hashfuzz partitions (must be a power of 2)\n"
+      "  -k            - enable checksum based hashfuzz (slow!) - default is\n"
+      "                  transformation like\n\n"
 
       "Execution control settings:\n"
       "  -p schedule   - power schedules compute a seed's performance score:\n"
@@ -423,9 +425,7 @@ int main(int argc, char **argv_orig, char **envp) {
   afl->debug = debug;
   afl_fsrv_init(&afl->fsrv);
   if (debug) { afl->fsrv.debug = true; }
-  if (afl->hashfuzz_enabled && !afl->hashfuzz_is_input_based) { 
-    afl->fsrv.hashfuzz_output_based = true; 
-  }
+  afl->hashfuzz_mimic_transformation = true;
   read_afl_environment(afl, envp);
   if (afl->shm.map_size) { afl->fsrv.map_size = afl->shm.map_size; }
   exit_1 = !!afl->afl_env.afl_bench_just_one;
@@ -442,7 +442,7 @@ int main(int argc, char **argv_orig, char **envp) {
 
   while ((opt = getopt(
               argc, argv,
-              "+b:B:c:CdDe:E:hH:i:I:f:F:l:L:m:M:nNOo:P:p:RQs:S:t:T:UV:Wx:Z")) > 0) {
+              "+b:B:c:CdDe:E:hH:i:I:f:F:l:kL:m:M:nNOo:P:p:RQs:S:t:T:UV:Wx:Z")) > 0) {
 
     switch (opt) {
 
@@ -1132,6 +1132,10 @@ int main(int argc, char **argv_orig, char **envp) {
         break;
       }
 
+      case 'k':
+        afl->hashfuzz_mimic_transformation = false;
+        break;
+
       case 'h':
         show_help++;
         break;  // not needed
@@ -1162,6 +1166,12 @@ int main(int argc, char **argv_orig, char **envp) {
 
     FATAL("If using hashfuzz (-H), you must also specify the number of partitions with -P");
     
+  }
+
+  if (!afl->hashfuzz_mimic_transformation && !afl->hashfuzz_enabled) {
+
+    FATAL("If using -k flag, you probably want to enable hashfuzz too (with -H; see help)");
+
   }
 
   if (unlikely(afl->afl_env.afl_persistent_record)) {
@@ -2015,47 +2025,40 @@ int main(int argc, char **argv_orig, char **envp) {
 
   while (likely(!afl->stop_soon)) {
 
-    if (afl->hashfuzz_enabled) {
+    if (afl->hashfuzz_enabled && !afl->hashfuzz_mimic_transformation) {
       static u32 lastCycle = 1;
+
       if (afl->queue_cycle != lastCycle) {
-          lastCycle = afl->queue_cycle;
-  #ifdef ORIGINAL_HASHFUZZ_MIMIC
-          u64 partitionAdded = 0;
-          printf("ORIGINAL HASHFUZZ MIMIC: BEGINNING NEW QUEUE CYCLE %llu\n", afl->queue_cycle);
-  #else
-          printf("BEGINNING NEW QUEUE CYCLE %llu\n", afl->queue_cycle);
-  #endif
-          // Every queue cycle, swap in inputs from a different hashfuzz partition for each path
-          for (u32 i = 0; i < afl->queued_paths; i++) {
-              struct queue_entry *q = afl->queue_buf[i];
 
-              // Find the corresponding path_partition entry
-              struct path_partitions sought = { .checksum = q->exec_cksum };
-              struct path_partitions *found = hashmap_get(hashfuzzFoundPartitions, &sought);
+        lastCycle = afl->queue_cycle;
 
-              if (!found) {
-                  printf("WTFFFF failed to find path_partition with checksum %020llu\n", q->exec_cksum);
-              } else {
-  #ifdef ORIGINAL_HASHFUZZ_MIMIC
-                  if (!(partitionAdded & (1 << q->hashfuzzClass))) {
-                    q->disabled = false;
-                    partitionAdded |= (1 << q->hashfuzzClass);
-                  } else {
-                    q->disabled = q->discoveryOrder != 0;
-                  }
-  #else
-                  // Only enable one input per path for each queue cycle
-                  q->disabled = afl->queue_cycle % found->foundPartitionsCount != q->discoveryOrder;
-  #endif
-                  printf("[%04d] cksum: %020llu, foundPartitionsCount: %d, partition: %03u, discoveryOrder: %d, enabled: %d\n", 
-                        i,
-                        q->exec_cksum, 
-                        found->foundPartitionsCount,
-                        q->hashfuzzClass,
-                        q->discoveryOrder,
-                        !(q->disabled));
-              }
+        printf("BEGINNING NEW QUEUE CYCLE %llu\n", afl->queue_cycle);
+        // Every queue cycle, swap in inputs from a different hashfuzz partition for each path
+        for (u32 i = 0; i < afl->queued_paths; i++) {
+
+          struct queue_entry *q = afl->queue_buf[i];
+
+          // Find the corresponding path_partition entry
+          struct path_partitions sought = { .checksum = q->exec_cksum };
+          struct path_partitions *found = hashmap_get(hashfuzzFoundPartitions, &sought);
+
+          if (!found) {
+            printf("WTFFFF failed to find path_partition with checksum %020llu\n", q->exec_cksum);
+          } else {
+            // Only enable one input per path for each queue cycle
+            q->disabled = afl->queue_cycle % found->foundPartitionsCount != q->discoveryOrder;
+
+            printf("[%04d] cksum: %020llu, foundPartitionsCount: %d, partition: %03u, discoveryOrder: %d, enabled: %d\n", 
+                   i,
+                   q->exec_cksum, 
+                   found->foundPartitionsCount,
+                   q->hashfuzzClass,
+                   q->discoveryOrder,
+                   !(q->disabled));
           }
+
+        }
+        
       }
 
       // We have changed the enabled entries - need to rebuild the alias probability table

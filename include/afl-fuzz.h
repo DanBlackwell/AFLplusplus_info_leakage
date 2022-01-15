@@ -526,7 +526,7 @@ typedef struct afl_state {
       reinit_table,                     /* reinit the queue weight table    */
       hashfuzz_enabled,                 /* is hashfuzz enabled?             */
       hashfuzz_is_input_based,          /* is hashfuzz operating over inputs? */
-      // hashfuzz_mimic_transformation,    /* mimic the transformation from the original paper */
+      hashfuzz_mimic_transformation,    /* mimic the transformation from the original paper */
       hashfuzz_partitions;              /* number of hashfuzz partitions    */
 
   u8 *virgin_bits,                      /* Regions yet untouched by fuzzing */

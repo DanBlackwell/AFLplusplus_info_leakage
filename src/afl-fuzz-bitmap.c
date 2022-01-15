@@ -529,34 +529,43 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     interesting = new_bits;
     
     if (afl->hashfuzz_enabled) {
-      
+
       if (afl->hashfuzz_is_input_based) {
         hashfuzzClass = hashfuzzClassify(mem, len, afl->hashfuzz_partitions);
       } else {
         hashfuzzClass = afl->fsrv.last_run_output_hash_class;
       }
 
-      cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
+      if (afl->hashfuzz_mimic_transformation) {
 
-      bool matchesPathInQueue = false;
-      if (likely(!interesting)) {
-          struct queue_entry *q;
-          for (u32 i = 0; i < afl->queued_paths; i++) {
-              q = afl->queue_buf[i];
-              if (q->exec_cksum == cksum) {
-                  matchesPathInQueue = true;
-                  break;
-              }
-          }
-      }
+        // We'll use this to add an input for each partition during the initial run -
+        // it emulates the original program transformation (one seed added per partition)
+        static u64 discoveredPartitions = 0;
+    
+        u64 partitionBit = 1 << hashfuzzClass;
+        if (!(partitionBit & discoveredPartitions)) {
+          // enable this seed if it's the first one for that partition
+          printf("Adding (and enabling) first seed for partition %hhu\n", hashfuzzClass);
+          discoveredPartitions |= partitionBit;
+          interesting = true;
+        }
 
-      if (matchesPathInQueue || interesting) {
+      } else {  // Using new queue swapping method (performance penalty)
+      
+        cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
+
+        struct path_partitions sought = { .checksum = cksum };
+        struct path_partitions *found = hashmap_get(hashfuzzFoundPartitions, &sought);
+
+        if (interesting || found) {
           // Find out if we have a matching path with this hashfuzz classification
           // IMPORTANT: this needs calling even for new inputs 
           //            (to build the map of covered partitions)
           new_partition = check_if_new_partition(cksum, hashfuzzClass);
 
           interesting = interesting || (new_partition >= 0); // We don't have this one in the queue yet
+        }
+
       }
 
     }
@@ -625,17 +634,21 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
     }
 
-    /* AFLFast schedule? update the new queue entry */
-    if (cksum) {
+    if (!afl->hashfuzz_enabled || afl->hashfuzz_mimic_transformation) {
 
-      afl->queue_top->n_fuzz_entry = cksum % N_FUZZ_SIZE;
-      afl->n_fuzz[afl->queue_top->n_fuzz_entry] = 1;
+      /* AFLFast schedule? update the new queue entry */
+      if (cksum) {
+
+        afl->queue_top->n_fuzz_entry = cksum % N_FUZZ_SIZE;
+        afl->n_fuzz[afl->queue_top->n_fuzz_entry] = 1;
+
+      }
+
+      /* due to classify counts we have to recalculate the checksum */
+      cksum = afl->queue_top->exec_cksum =
+          hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
 
     }
-
-    /* due to classify counts we have to recalculate the checksum */
-    cksum = afl->queue_top->exec_cksum =
-        hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
 
     /* Try to calibrate inline; this also calls update_bitmap_score() when
        successful. */
