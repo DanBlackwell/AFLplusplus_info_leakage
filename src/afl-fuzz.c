@@ -105,6 +105,7 @@ static void usage(u8 *argv0, int more_help) {
       "Hashfuzz settings:\n"
       "  -H i/o        - enable hashfuzz over 'input'/'output'\n"
       "  -P partitions - hashfuzz partitions (must be a power of 2)\n"
+      "  -r execs      - number of execs between fuzzer resets\n"
       "  -k            - enable checksum based hashfuzz (slow!) - default is\n"
       "                  transformation like\n\n"
 
@@ -442,7 +443,7 @@ int main(int argc, char **argv_orig, char **envp) {
 
   while ((opt = getopt(
               argc, argv,
-              "+b:B:c:CdDe:E:hH:i:I:f:F:l:kL:m:M:nNOo:P:p:RQs:S:t:T:UV:Wx:Z")) > 0) {
+              "+b:B:c:CdDe:E:hH:i:I:f:F:l:kL:m:M:nNOo:P:p:r:RQs:S:t:T:UV:Wx:Z")) > 0) {
 
     switch (opt) {
 
@@ -1136,6 +1137,21 @@ int main(int argc, char **argv_orig, char **envp) {
         afl->hashfuzz_mimic_transformation = false;
         break;
 
+      case 'r': {
+        u32 r;
+
+        if (!optarg || 
+            sscanf(optarg, "%u", &r) != 1) {
+
+          FATAL("Bad syntax used for -r (expected an uint32_t)");
+
+        }
+
+        afl->hashfuzz_reset_period = r;
+
+        break;
+      }
+
       case 'h':
         show_help++;
         break;  // not needed
@@ -1171,6 +1187,18 @@ int main(int argc, char **argv_orig, char **envp) {
   if (!afl->hashfuzz_mimic_transformation && !afl->hashfuzz_enabled) {
 
     FATAL("If using -k flag, you probably want to enable hashfuzz too (with -H; see help)");
+
+  }
+
+  if (!afl->hashfuzz_enabled && afl->hashfuzz_reset_period) {
+
+    FATAL("If setting the -r flag, you probably want to enable hashfuzz too (see help)");
+
+  }
+
+  if (afl->hashfuzz_reset_period && !afl->hashfuzz_mimic_transformation) {
+
+    FATAL("If setting the -r flag, you must be using the transformation implementation of hashfuzz (see help)");
 
   }
 
@@ -2024,6 +2052,36 @@ int main(int argc, char **argv_orig, char **envp) {
   #endif
 
   while (likely(!afl->stop_soon)) {
+
+		// Used to keep track of whether fuzzer needs resetting
+		static u64 last_multiple = 0;
+
+    if (afl->hashfuzz_reset_period &&
+        afl->fsrv.total_execs > 0 && 
+        afl->fsrv.total_execs / afl->hashfuzz_reset_period > last_multiple) 
+    {
+
+			last_multiple = afl->fsrv.total_execs / afl->hashfuzz_reset_period;
+
+			printf("Resetting the fuzzer (AS PER HASHFUZZ)\n");
+
+      // For now let's just reset the discovered partitions...
+//      // Remove old entries from the queue
+//      for (u32 i = 0; i < afl->queued_paths - 1; i++) {
+//        struct queue_entry *q = afl->queue_buf[i];
+//        q->disabled = true;
+//      }
+//
+//      // Make sure the fuzzer is pointing at the enabled entry
+//      afl->current_entry = afl->queued_paths - 1;
+//
+//			// Clear the virgin map :(
+//      memset(afl->virgin_bits, 255, map_size);
+
+      // Reset the discovered partitions map to allow rediscovery
+      afl->hashfuzz_discovered_partitions = 0;
+
+    }
 
     if (afl->hashfuzz_enabled && !afl->hashfuzz_mimic_transformation) {
       static u32 lastCycle = 1;

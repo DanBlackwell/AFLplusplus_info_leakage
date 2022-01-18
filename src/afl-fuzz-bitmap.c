@@ -538,15 +538,11 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
       if (afl->hashfuzz_mimic_transformation) {
 
-        // We'll use this to add an input for each partition during the initial run -
-        // it emulates the original program transformation (one seed added per partition)
-        static u64 discoveredPartitions = 0;
-    
         u64 partitionBit = 1 << hashfuzzClass;
-        if (!(partitionBit & discoveredPartitions)) {
+        if (!(partitionBit & afl->hashfuzz_discovered_partitions)) {
           // enable this seed if it's the first one for that partition
           printf("Adding (and enabling) first seed for partition %hhu\n", hashfuzzClass);
-          discoveredPartitions |= partitionBit;
+          afl->hashfuzz_discovered_partitions |= partitionBit;
           interesting = true;
         }
 

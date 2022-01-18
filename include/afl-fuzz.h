@@ -529,6 +529,9 @@ typedef struct afl_state {
       hashfuzz_mimic_transformation,    /* mimic the transformation from the original paper */
       hashfuzz_partitions;              /* number of hashfuzz partitions    */
 
+  u32 hashfuzz_reset_period;            /* number of executions between resets */
+  u64 hashfuzz_discovered_partitions;   /* bit-fields marking discovered hashfuzz partitions */
+
   u8 *virgin_bits,                      /* Regions yet untouched by fuzzing */
       *virgin_tmout,                    /* Bits we haven't seen in tmouts   */
       *virgin_crash;                    /* Bits we haven't seen in crashes  */
