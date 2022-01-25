@@ -425,6 +425,7 @@ int main(int argc, char **argv_orig, char **envp) {
   afl_state_init(afl, map_size);
   afl->debug = debug;
   afl_fsrv_init(&afl->fsrv);
+  if (!afl->hashfuzz_is_input_based) { afl->fsrv.hashfuzz_output_based = true; }
   if (debug) { afl->fsrv.debug = true; }
   afl->hashfuzz_mimic_transformation = true;
   read_afl_environment(afl, envp);

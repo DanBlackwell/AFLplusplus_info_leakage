@@ -615,6 +615,10 @@ void afl_fsrv_start(afl_forkserver_t *fsrv, char **argv,
   if (fsrv->hashfuzz_output_based) {
     close(stdout_pipe[1]);
     fsrv->fsrv_stdout_fd = stdout_pipe[0];
+
+    // Set the pipe non-blocking to prevent deadlocks
+    int flags = fcntl(fsrv->fsrv_stdout_fd, F_GETFL, 0);
+    fcntl(fsrv->fsrv_stdout_fd, F_SETFL, flags | O_NONBLOCK);
   }
 
   /* Wait for the fork server to come up, but don't wait too long. */
@@ -1350,8 +1354,8 @@ fsrv_run_result_t afl_fsrv_run_target(afl_forkserver_t *fsrv, u32 timeout,
       char *p = findLast(buf, sought);
       if (p) {
         sscanf(p + strlen(sought), "%hhu", &fsrv->last_run_output_hash_class);
-        // printf("Hashfuzz class updated to %hhu\n", 
-        //        fsrv->last_run_output_hash_class);
+        //  printf("Hashfuzz class updated to %hhu\n", 
+        //         fsrv->last_run_output_hash_class);
       }
 
       if (len < readLen) break;
