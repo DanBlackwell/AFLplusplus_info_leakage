@@ -26,9 +26,7 @@
 #include "afl-fuzz.h"
 #include <limits.h>
 #include "cmplog.h"
-#ifdef HASHFUZZ
 #include "hashfuzz.h"
-#endif
 
 #ifdef HAVE_AFFINITY
 

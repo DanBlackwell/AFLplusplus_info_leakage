@@ -24,6 +24,7 @@
  */
 
 #include "afl-fuzz.h"
+#include "hashfuzz.h"
 #include <string.h>
 #include <limits.h>
 #include "cmplog.h"
@@ -2023,7 +2024,37 @@ havoc_stage:
 
   }
 
-  for (afl->stage_cur = 0; afl->stage_cur < afl->stage_max; ++afl->stage_cur) {
+  int latest_hit_cnt = afl->queued_paths + afl->unique_crashes;
+  int entries = 1;
+
+  if (afl->hashfuzz_enabled && !afl->hashfuzz_mimic_transformation) {
+    struct path_partitions  sought = {.checksum = afl->queue_cur->exec_cksum};
+    struct path_partitions *found = hashmap_get(hashfuzzFoundPartitions, &sought);
+
+    if (found) {
+      // This input discovers a new partition for this path
+      entries = found->foundPartitionsCount;
+    } else {
+      printf("WTF fuzz_one_input failed to find an entry for %020llu\n", sought.checksum);
+    }
+  }
+
+  for (afl->stage_cur = 0; afl->stage_cur < afl->stage_max / entries; ++afl->stage_cur) {
+
+    if (afl->hashfuzz_enabled && !afl->hashfuzz_mimic_transformation &&
+        afl->queued_paths + afl->unique_crashes - latest_hit_cnt > 0) {
+      latest_hit_cnt = afl->queued_paths + afl->unique_crashes;
+
+      struct path_partitions  sought = {.checksum = afl->queue_cur->exec_cksum};
+      struct path_partitions *found = hashmap_get(hashfuzzFoundPartitions, &sought);
+
+      if (found) {
+        // This input discovers a new partition for this path
+        entries = found->foundPartitionsCount;
+      } else {
+        printf("WTF fuzz_one_input failed to find an entry for %020llu\n", sought.checksum);
+      }
+    }
 
     u32 use_stacking = 1 << (1 + rand_below(afl, afl->havoc_stack_pow2));
 

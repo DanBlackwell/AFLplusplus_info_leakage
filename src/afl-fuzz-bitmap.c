@@ -477,7 +477,7 @@ s8 check_if_new_partition(u64 checksum, u8 partition) {
     }
   }
 
-  printf("Found checksum %020llu with partition %03hhu, hashmap count: %llu\n", checksum, partition, hashmap_count(hashfuzzFoundPartitions));
+  printf("Found checksum %020llu with partition %03hhu, hashmap count: %lu\n", checksum, partition, hashmap_count(hashfuzzFoundPartitions));
   sought.foundPartitions = partitionBitmap;
   sought.foundPartitionsCount = 1;
   hashmap_set(hashfuzzFoundPartitions, &sought);

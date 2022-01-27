@@ -2084,45 +2084,45 @@ int main(int argc, char **argv_orig, char **envp) {
 
     }
 
-    if (afl->hashfuzz_enabled && !afl->hashfuzz_mimic_transformation) {
-      static u32 lastCycle = 1;
-
-      if (afl->queue_cycle != lastCycle) {
-
-        lastCycle = afl->queue_cycle;
-
-        printf("BEGINNING NEW QUEUE CYCLE %llu\n", afl->queue_cycle);
-        // Every queue cycle, swap in inputs from a different hashfuzz partition for each path
-        for (u32 i = 0; i < afl->queued_paths; i++) {
-
-          struct queue_entry *q = afl->queue_buf[i];
-
-          // Find the corresponding path_partition entry
-          struct path_partitions sought = { .checksum = q->exec_cksum };
-          struct path_partitions *found = hashmap_get(hashfuzzFoundPartitions, &sought);
-
-          if (!found) {
-            printf("WTFFFF failed to find path_partition with checksum %020llu\n", q->exec_cksum);
-          } else {
-            // Only enable one input per path for each queue cycle
-            q->disabled = afl->queue_cycle % found->foundPartitionsCount != q->discoveryOrder;
-
-            printf("[%04d] cksum: %020llu, foundPartitionsCount: %d, partition: %03u, discoveryOrder: %d, enabled: %d\n", 
-                   i,
-                   q->exec_cksum, 
-                   found->foundPartitionsCount,
-                   q->hashfuzzClass,
-                   q->discoveryOrder,
-                   !(q->disabled));
-          }
-
-        }
-        
-      }
-
-      // We have changed the enabled entries - need to rebuild the alias probability table
-      afl->reinit_table = 1;
-    }
+//    if (afl->hashfuzz_enabled && !afl->hashfuzz_mimic_transformation) {
+//      static u32 lastCycle = 1;
+//
+//      if (afl->queue_cycle != lastCycle) {
+//
+//        lastCycle = afl->queue_cycle;
+//
+//        printf("BEGINNING NEW QUEUE CYCLE %llu\n", afl->queue_cycle);
+//        // Every queue cycle, swap in inputs from a different hashfuzz partition for each path
+//        for (u32 i = 0; i < afl->queued_paths; i++) {
+//
+//          struct queue_entry *q = afl->queue_buf[i];
+//
+//          // Find the corresponding path_partition entry
+//          struct path_partitions sought = { .checksum = q->exec_cksum };
+//          struct path_partitions *found = hashmap_get(hashfuzzFoundPartitions, &sought);
+//
+//          if (!found) {
+//            printf("WTFFFF failed to find path_partition with checksum %020llu\n", q->exec_cksum);
+//          } else {
+//            // Only enable one input per path for each queue cycle
+//            q->disabled = afl->queue_cycle % found->foundPartitionsCount != q->discoveryOrder;
+//
+//            printf("[%04d] cksum: %020llu, foundPartitionsCount: %d, partition: %03u, discoveryOrder: %d, enabled: %d\n",
+//                   i,
+//                   q->exec_cksum,
+//                   found->foundPartitionsCount,
+//                   q->hashfuzzClass,
+//                   q->discoveryOrder,
+//                   !(q->disabled));
+//          }
+//
+//        }
+//
+//      }
+//
+//      // We have changed the enabled entries - need to rebuild the alias probability table
+//      afl->reinit_table = 1;
+//    }
 
     cull_queue(afl);
 
