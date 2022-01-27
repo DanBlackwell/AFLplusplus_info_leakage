@@ -2034,6 +2034,9 @@ havoc_stage:
     if (found) {
       // This input discovers a new partition for this path
       entries = found->foundPartitionsCount;
+      if (entries > 1) {
+        printf("NEW SEED: found %d partitions, will fuzz for %ds (rather than %ds)\n", entries, afl->stage_max / entries, afl->stage_max);
+      }
     } else {
       printf("WTF fuzz_one_input failed to find an entry for %020llu\n", sought.checksum);
     }
@@ -2050,6 +2053,13 @@ havoc_stage:
 
       if (found) {
         // This input discovers a new partition for this path
+        if (found->foundPartitionsCount != entries && found->foundPartitionsCount > 1) {
+          printf("IN MIDDLE OF FUZZING SEED: found %d partitions (was %d), will fuzz for %ds (rather than %ds)\n", 
+              found->foundPartitionsCount, 
+              entries,
+              afl->stage_max / found->foundPartitionsCount,
+              afl->stage_max);
+        }
         entries = found->foundPartitionsCount;
       } else {
         printf("WTF fuzz_one_input failed to find an entry for %020llu\n", sought.checksum);
