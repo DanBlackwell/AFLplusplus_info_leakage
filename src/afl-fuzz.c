@@ -107,7 +107,9 @@ static void usage(u8 *argv0, int more_help) {
       "  -P partitions - hashfuzz partitions (must be a power of 2)\n"
       "  -r execs      - number of execs between fuzzer resets\n"
       "  -k            - enable checksum based hashfuzz (slow!) - default is\n"
-      "                  transformation like\n\n"
+      "                  transformation like\n"
+      "  NCD Settings\n"
+      "    -N           - Enable NCD based queue (2 entries per checksum)\n\n"
 
       "Execution control settings:\n"
       "  -p schedule   - power schedules compute a seed's performance score:\n"
@@ -146,8 +148,6 @@ static void usage(u8 *argv0, int more_help) {
       "Fuzzing behavior settings:\n"
       "  -Z            - sequential queue selection instead of weighted "
       "random\n"
-      "  -N            - do not unlink the fuzzing input file (for devices "
-      "etc.)\n"
       "  -n            - fuzz without instrumentation (non-instrumented mode)\n"
       "  -x dict_file  - fuzzer dictionary (see README.md, specify up to 4 "
       "times)\n\n"
@@ -857,10 +857,11 @@ int main(int argc, char **argv_orig, char **envp) {
 
         break;
 
-      case 'N':                                             /* Unicorn mode */
+      case 'N':                                             /* NCD based queue */
 
-        if (afl->no_unlink) { FATAL("Multiple -N options not supported"); }
-        afl->fsrv.no_unlink = (afl->no_unlink = true);
+        afl->ncd_based_queue = true;
+        afl->hashfuzz_is_input_based = true;
+        afl->hashfuzz_partitions = 2;
 
         break;
 
@@ -1179,6 +1180,12 @@ int main(int argc, char **argv_orig, char **envp) {
 
   }
 
+  if (afl->hashfuzz_enabled && afl->ncd_based_queue) {
+
+    FATAL("You can't use hashfuzz (-H) and NCD based queue (-N) together!");
+
+  }
+
   if (afl->hashfuzz_enabled && !afl->hashfuzz_partitions) {
 
     FATAL("If using hashfuzz (-H), you must also specify the number of partitions with -P");
@@ -1316,7 +1323,7 @@ int main(int argc, char **argv_orig, char **envp) {
 
   }
 
-  if (afl->hashfuzz_enabled) {
+  if (afl->hashfuzz_enabled || afl->ncd_based_queue) {
     hashfuzzFoundPartitions = hashmap_new_with_allocator(ck_alloc, ck_realloc, ck_free,
         sizeof(struct path_partitions), 0, 0, 0,
         path_partitions_hash, path_partitions_compare,
@@ -2062,67 +2069,14 @@ int main(int argc, char **argv_orig, char **envp) {
         afl->fsrv.total_execs / afl->hashfuzz_reset_period > last_multiple) 
     {
 
-			last_multiple = afl->fsrv.total_execs / afl->hashfuzz_reset_period;
+      last_multiple = afl->fsrv.total_execs / afl->hashfuzz_reset_period;
 
-			printf("Resetting the fuzzer (AS PER HASHFUZZ)\n");
-
-      // For now let's just reset the discovered partitions...
-//      // Remove old entries from the queue
-//      for (u32 i = 0; i < afl->queued_paths - 1; i++) {
-//        struct queue_entry *q = afl->queue_buf[i];
-//        q->disabled = true;
-//      }
-//
-//      // Make sure the fuzzer is pointing at the enabled entry
-//      afl->current_entry = afl->queued_paths - 1;
-//
-//			// Clear the virgin map :(
-//      memset(afl->virgin_bits, 255, map_size);
+      printf("Resetting the fuzzer (AS PER HASHFUZZ)\n");
 
       // Reset the discovered partitions map to allow rediscovery
       afl->hashfuzz_discovered_partitions = 0;
 
     }
-
-//    if (afl->hashfuzz_enabled && !afl->hashfuzz_mimic_transformation) {
-//      static u32 lastCycle = 1;
-//
-//      if (afl->queue_cycle != lastCycle) {
-//
-//        lastCycle = afl->queue_cycle;
-//
-//        printf("BEGINNING NEW QUEUE CYCLE %llu\n", afl->queue_cycle);
-//        // Every queue cycle, swap in inputs from a different hashfuzz partition for each path
-//        for (u32 i = 0; i < afl->queued_paths; i++) {
-//
-//          struct queue_entry *q = afl->queue_buf[i];
-//
-//          // Find the corresponding path_partition entry
-//          struct path_partitions sought = { .checksum = q->exec_cksum };
-//          struct path_partitions *found = hashmap_get(hashfuzzFoundPartitions, &sought);
-//
-//          if (!found) {
-//            printf("WTFFFF failed to find path_partition with checksum %020llu\n", q->exec_cksum);
-//          } else {
-//            // Only enable one input per path for each queue cycle
-//            q->disabled = afl->queue_cycle % found->foundPartitionsCount != q->discoveryOrder;
-//
-//            printf("[%04d] cksum: %020llu, foundPartitionsCount: %d, partition: %03u, discoveryOrder: %d, enabled: %d\n",
-//                   i,
-//                   q->exec_cksum,
-//                   found->foundPartitionsCount,
-//                   q->hashfuzzClass,
-//                   q->discoveryOrder,
-//                   !(q->disabled));
-//          }
-//
-//        }
-//
-//      }
-//
-//      // We have changed the enabled entries - need to rebuild the alias probability table
-//      afl->reinit_table = 1;
-//    }
 
     cull_queue(afl);
 

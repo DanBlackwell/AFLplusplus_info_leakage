@@ -23,9 +23,9 @@
  */
 
 #include "afl-fuzz.h"
-#ifdef HASHFUZZ
-  #include "hashfuzz.h"
-#endif
+#include "lz4.h"
+#include "hashmap.h"
+#include "hashfuzz.h"
 #include <limits.h>
 #include <ctype.h>
 #include <math.h>
@@ -1309,3 +1309,63 @@ inline void queue_testcase_store_mem(afl_state_t *afl, struct queue_entry *q,
 
 }
 
+
+/* Calc NCD - we will pass in compressedData as we've already malloced it */
+
+float calc_NCD(afl_state_t *afl, 
+               struct queue_entry *a, 
+               struct queue_entry *b, 
+               u8 *compressedData, 
+               u32 maxCompressedLen, 
+               u8 *uncompressedData) {
+
+  if (!a->compressed_len) {
+    u8 *input_buf = a->testcase_buf;
+
+    if (!input_buf) {
+      printf("Oops - missing buffer for a\n");
+      input_buf = queue_testcase_get(afl, a);
+    }
+
+    a->compressed_len = LZ4_compress_default(input_buf, 
+                                             compressedData, 
+                                             a->len, 
+                                             maxCompressedLen);
+  }
+
+  if (!b->compressed_len) {
+    u8 *input_buf = b->testcase_buf;
+
+    if (!input_buf) {
+      printf("Oops - missing buffer for b\n");
+      input_buf = queue_testcase_get(afl, b);
+    }
+
+    b->compressed_len = LZ4_compress_default(input_buf, 
+                                             compressedData, 
+                                             b->len, 
+                                             maxCompressedLen);
+  }
+
+  memcpy(uncompressedData, a->testcase_buf, a->len);
+  memcpy(uncompressedData + a->len, b->testcase_buf, b->len);
+  s32 concatCompressedLen = LZ4_compress_default(uncompressedData, 
+                                                 compressedData,
+                                                 a->len + b->len, 
+                                                 maxCompressedLen);
+  // printf("Ok, got compressed: C(A): %d, C(B): %d, C(AB): %d\n", a->compressed_len, b->compressed_len, concatCompressedLen);
+
+  u32 min = a->compressed_len < b->compressed_len ? 
+              a->compressed_len : 
+              b->compressed_len;
+
+  u32 max = a->compressed_len > b->compressed_len ?
+              a->compressed_len : 
+              b->compressed_len;
+
+  // don't divide by 0...
+  if (max == 0)
+    return 0;
+
+  return ((float)concatCompressedLen - min) / (float)max;
+}

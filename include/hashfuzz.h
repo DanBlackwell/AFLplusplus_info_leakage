@@ -13,6 +13,8 @@ struct path_partitions {
     u64 checksum;
     u32 foundPartitions;
     u8 foundPartitionsCount;
+    struct queue_entry *queue_entries[64];
+    float normalised_compression_dist;
 };
 
 // extern struct path_partitions *hashfuzzFoundPartitions;

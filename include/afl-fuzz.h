@@ -173,7 +173,8 @@ struct queue_entry {
 
   u32 bitmap_size,                      /* Number of bits set in bitmap     */
       fuzz_level,                       /* Number of fuzzing iterations     */
-      n_fuzz_entry;                     /* offset in n_fuzz                 */
+      n_fuzz_entry,                     /* offset in n_fuzz                 */
+      compressed_len;                   /* The compressed (lz4) length      */
 
   u64 exec_us,                          /* Execution time (us)              */
       handicap,                         /* Number of queue cycles behind    */
@@ -527,7 +528,8 @@ typedef struct afl_state {
       hashfuzz_enabled,                 /* is hashfuzz enabled?             */
       hashfuzz_is_input_based,          /* is hashfuzz operating over inputs? */
       hashfuzz_mimic_transformation,    /* mimic the transformation from the original paper */
-      hashfuzz_partitions;              /* number of hashfuzz partitions    */
+      hashfuzz_partitions,              /* number of hashfuzz partitions    */
+      ncd_based_queue;                  /* are we using NCD queue?          */
 
   u32 hashfuzz_reset_period;            /* number of executions between resets */
   u64 hashfuzz_discovered_partitions;   /* bit-fields marking discovered hashfuzz partitions */

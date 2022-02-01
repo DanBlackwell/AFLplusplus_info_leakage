@@ -2027,7 +2027,8 @@ havoc_stage:
   int latest_hit_cnt = afl->queued_paths + afl->unique_crashes;
   int entries = 1;
 
-  if (afl->hashfuzz_enabled && !afl->hashfuzz_mimic_transformation) {
+  bool splitFuzzTime = (afl->hashfuzz_enabled && !afl->hashfuzz_mimic_transformation) || afl->ncd_based_queue;
+  if (splitFuzzTime) {
     struct path_partitions  sought = {.checksum = afl->queue_cur->exec_cksum};
     struct path_partitions *found = hashmap_get(hashfuzzFoundPartitions, &sought);
 
@@ -2041,7 +2042,7 @@ havoc_stage:
 
   for (afl->stage_cur = 0; afl->stage_cur < afl->stage_max / entries; ++afl->stage_cur) {
 
-    if (afl->hashfuzz_enabled && !afl->hashfuzz_mimic_transformation &&
+    if (splitFuzzTime &&
         afl->queued_paths + afl->unique_crashes - latest_hit_cnt > 0) {
       latest_hit_cnt = afl->queued_paths + afl->unique_crashes;
 
