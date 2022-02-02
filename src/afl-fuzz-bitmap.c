@@ -688,8 +688,6 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
             u32 bitcnt = 0, val = len;
             while (val > 1) { bitcnt++; val >>= 1; }
             prevLongest = 1 << (bitcnt + 2);  // round up to next power of 2
-            printf("reallocing to size: %u (for input len %d)\n", prevLongest, len);
-            fflush(stdout);
 
             uncompressedData = realloc(uncompressedData, prevLongest);
             if (!uncompressedData) printf("Realloc FAILED!\n");
@@ -723,7 +721,29 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
                 for (u32 i = 0; i < afl->queued_paths; i++) {
                   if (afl->queue_buf[i] == evicted) {
                     foundInQ = true;
-                    afl->queue_buf[i]->disabled = true;
+
+#ifdef NOISY
+                    char oldBuf[4096], newBuf[4096]; int oldLen = 0, newLen = 0;
+                    for (u32 i = 0; i < evicted->len; i++) {
+                      oldLen += sprintf(oldBuf + oldLen, "%hhu,", evicted->testcase_buf[i]);
+                    }
+                    for (u32 i = 0; i < len; i++) {
+                      newLen += sprintf(newBuf + newLen, "%hhu,", ((u8 *)mem)[i]);
+                    }
+
+                    printf("Rewriting file %s from %s to %s\n", evicted->fname, oldBuf, newBuf);
+#endif
+
+                    free(evicted->testcase_buf);
+                    evicted->testcase_buf = malloc(len);
+                    memcpy(evicted->testcase_buf, mem, len);
+                    evicted->len = len;
+                    evicted->compressed_len = compressedLen;
+
+                    fd = open(evicted->fname, O_WRONLY | O_TRUNC, DEFAULT_PERMISSION);
+                    if (unlikely(fd < 0)) { PFATAL("Unable to open '%s'", evicted->fname); }
+                    ck_write(fd, mem, len, evicted->fname);
+                    close(fd);
 #ifdef NOISY
                     printf("Disabled queue entry %d with cksum: %020llu\n", i,
                            cksum);
@@ -797,9 +817,21 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
 #ifndef SIMPLE_FILES
 
-    queue_fn = alloc_printf(
-        "%s/queue/id:%06u,cksum:%020llu,%s", afl->out_dir, afl->queued_paths, cksum,
-        describe_op(afl, new_bits, new_partition >= 0, NAME_MAX - strlen("id:000000,")));
+    if (afl->ncd_based_queue) {
+      // If there's an eviction then no new file will be created
+      if (evicted == NULL) {
+        queue_fn = alloc_printf(
+            "%s/queue/id:%06u,cksum:%020llu,entry:%d,%s", afl->out_dir,
+            afl->queued_paths, cksum,
+            pathPartitions == NULL ? 0 : pathPartitions->foundPartitionsCount,
+            describe_op(afl, new_bits, new_partition >= 0, NAME_MAX - 35));
+      }
+
+    } else {
+      queue_fn = alloc_printf("%s/queue/id:%06u,cksum:%020llu,%s", afl->out_dir,
+                              afl->queued_paths, cksum,
+                              describe_op(afl, new_bits, new_partition >= 0,NAME_MAX - strlen("id:000000,")));
+    }
 
 #else
 
@@ -807,11 +839,15 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
         alloc_printf("%s/queue/id_%06u", afl->out_dir, afl->queued_paths);
 
 #endif                                                    /* ^!SIMPLE_FILES */
-    fd = open(queue_fn, O_WRONLY | O_CREAT | O_EXCL, DEFAULT_PERMISSION);
-    if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", queue_fn); }
-    ck_write(fd, mem, len, queue_fn);
-    close(fd);
-    add_to_queue(afl, queue_fn, len, 0, hashfuzzClass, cksum, new_partition);
+
+    // Don't write a new file if we have evicted an old one...
+    if (!afl->ncd_based_queue || !evicted) {
+      fd = open(queue_fn, O_WRONLY | O_CREAT | O_EXCL, DEFAULT_PERMISSION);
+      if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", queue_fn); }
+      ck_write(fd, mem, len, queue_fn);
+      close(fd);
+      add_to_queue(afl, queue_fn, len, 0, hashfuzzClass, cksum, new_partition);
+    }
 
 #ifdef INTROSPECTION
     if (afl->custom_mutators_count && afl->current_custom_fuzz) {
@@ -883,40 +919,41 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     }
 
     if (afl->ncd_based_queue) {
-      struct queue_entry *new = afl->queue_top;
-      new->compressed_len = compressedLen;
 
       if (evicted) {
-        bool foundInQ = false;
-        for (int i = 0; i < pathPartitions->foundPartitionsCount; i++) {
-          if (pathPartitions->queue_entries[i] == evicted) {
-#ifdef NOISY
-            printf("Replacing entry at %d with new one\n", i);
-#endif
-            pathPartitions->queue_entries[i] = new;
-            foundInQ = true;
-            break;
-          }
-        }
-
-        dumpOutDebugInfo(afl);
-
-        if (!foundInQ) {
-          char buf[4096];
-          int len = 0;
-          len += snprintf(buf, 4096 - len, "[");
-          for (int i = 0; i < pathPartitions->foundPartitionsCount; i++) {
-            len += snprintf(buf, 4096 - len, "%s, ",
-                            pathPartitions->queue_entries[i]->fname);
-          }
-          snprintf(buf, 4096 - len, "\b\b]");
-
-          PFATAL(
-              "Failed to find entry named %s in pathPartitions->queue_entries for eviction (found %s)\n",
-              evicted->fname, buf);
-        }
+//        bool foundInQ = false;
+//        for (int i = 0; i < pathPartitions->foundPartitionsCount; i++) {
+//          if (pathPartitions->queue_entries[i] == evicted) {
+//#ifdef NOISY
+//            printf("Replacing entry at %d with new one\n", i);
+//#endif
+//            pathPartitions->queue_entries[i] = new;
+//            foundInQ = true;
+//            break;
+//          }
+//        }
+//
+//        dumpOutDebugInfo(afl);
+//
+//        if (!foundInQ) {
+//          char buf[4096];
+//          int len = 0;
+//          len += snprintf(buf, 4096 - len, "[");
+//          for (int i = 0; i < pathPartitions->foundPartitionsCount; i++) {
+//            len += snprintf(buf, 4096 - len, "%s, ",
+//                            pathPartitions->queue_entries[i]->fname);
+//          }
+//          snprintf(buf, 4096 - len, "\b\b]");
+//
+//          PFATAL(
+//              "Failed to find entry named %s in pathPartitions->queue_entries for eviction (found %s)\n",
+//              evicted->fname, buf);
+//        }
 
       } else /* we are adding because we've not filled our queue yet */ {
+        struct queue_entry *new = afl->queue_top;
+        new->compressed_len = compressedLen;
+
         if (pathPartitions == NULL) {
           struct path_partitions newPP = {.checksum = cksum, .foundPartitionsCount = 1};
           newPP.queue_entries[0] = new;

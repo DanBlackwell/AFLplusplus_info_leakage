@@ -121,6 +121,7 @@
 #include "list.h"
 #ifndef SIMPLE_FILES
   #define CASE_PREFIX "id:"
+
 #else
   #define CASE_PREFIX "id_"
 #endif                                                    /* ^!SIMPLE_FILES */

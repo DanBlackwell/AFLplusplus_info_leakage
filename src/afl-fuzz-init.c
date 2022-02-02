@@ -1737,7 +1737,7 @@ static void handle_existing_out_dir(afl_state_t *afl) {
   ck_free(fn);
 
   fn = alloc_printf("%s/queue", afl->out_dir);
-  if (delete_files(fn, CASE_PREFIX)) { goto dir_cleanup_failed; }
+  if (delete_files(fn, "id:") && delete_files(fn, "cksum:")) { goto dir_cleanup_failed; }
   ck_free(fn);
 
   /* All right, let's do <afl->out_dir>/crashes/id:* and
