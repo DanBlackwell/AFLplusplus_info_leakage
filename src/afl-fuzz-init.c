@@ -1161,6 +1161,7 @@ void perform_dry_run(afl_state_t *afl) {
     } else if (afl->ncd_based_queue) {
       struct path_partitions new = {.checksum = q->exec_cksum,
                                     .foundPartitionsCount = 1};
+      new.queue_entries[0] = q;
       hashmap_set(hashfuzzFoundPartitions, &new);
     }
 
