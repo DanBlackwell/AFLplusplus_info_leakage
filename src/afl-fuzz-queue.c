@@ -305,6 +305,19 @@ void mark_as_redundant(afl_state_t *afl, struct queue_entry *q, u8 state) {
   sprintf(fn, "%s/queue/.state/redundant_edges/%s", afl->out_dir,
           strrchr(q->fname, '/') + 1);
 
+  if (afl->ncd_based_queue) {
+    char *startPos = strrchr(q->fname, '/') + 1;
+    char *updatedPos;
+    if ((updatedPos = strstr(startPos, ",updated:"))) {
+      char *nextComma = strchr(updatedPos, ',');
+      char buf[PATH_MAX];
+      int pos = snprintf(buf, updatedPos - (char *)startPos, "%s", startPos);
+      strcat(buf + pos, nextComma);
+
+      sprintf(fn, "%s/queue/.state/redundant_edges/%s", afl->out_dir, buf);
+    }
+  }
+
   if (state) {
 
     s32 fd;
