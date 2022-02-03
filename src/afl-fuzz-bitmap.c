@@ -515,7 +515,7 @@ float calc_NCD_raw_buffer(afl_state_t *afl,
   memcpy(uncompressedData + a->len, b_buffer, b_len);
   s32 concatCompressedLen = LZ4_compress_default(uncompressedData,
                                                  compressedData,
-                                                 (int)a->len + b_len,
+                                                 (int)(a->len + b_len),
                                                  (int)maxCompressedLen);
   // printf("Ok, got compressed: C(A): %d, C(B): %d, C(AB): %d\n", a->compressed_len, b->compressed_len, concatCompressedLen);
 
@@ -623,7 +623,9 @@ struct queue_entry * isBetterEntry(afl_state_t *afl,
       .compressed_len = compressedLen
   };
 
+#ifdef NOISY
   float originalNCD = calc_NCD_for_path_partitions(afl, pathPartitions);
+#endif
 
   for (int i = 0; i < pathPartitions->foundPartitionsCount; i++) {
     struct queue_entry *existing = pathPartitions->queue_entries[i];
@@ -819,19 +821,37 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
                 if (unlikely(fd < 0)) { PFATAL("Unable to open '%s'", evicted->fname); }
                 ck_write(fd, mem, len, evicted->fname);
                 close(fd);
-#ifdef NOISY
-                printf("Disabled queue entry %d with cksum: %020llu\n", i,
-                           cksum);
-#endif
-//                    break;
-//                  }
-//                }
-//
-//                if (!foundInQ) {
-//                  PFATAL(
-//                      "Tried evicting output named: %s, but couldn't find it\n",
-//                      evicted->fname);
-//                }
+
+                char *newFilename = malloc(NAME_MAX);
+                long newFilenameLen = 0;
+                char *opPos = strstr(evicted->fname, ",op:");
+                if (!opPos) {
+                  FATAL("Failed to find \"op:\" in %s\n", evicted->fname);
+                }
+
+                char *updatedPos = strstr(evicted->fname, ",updated:");
+                if (updatedPos) {
+                  newFilenameLen = updatedPos - (char *)evicted->fname;
+                } else {
+                  newFilenameLen = opPos - (char *)evicted->fname;
+                }
+                memcpy(newFilename, evicted->fname, newFilenameLen);
+
+                newFilenameLen += snprintf(newFilename + newFilenameLen,
+                                           NAME_MAX - newFilenameLen,
+                                           ",updated:%llu",
+                                           get_cur_time() + afl->prev_run_time - afl->start_time);
+                newFilenameLen += snprintf(newFilename + newFilenameLen,
+                                           NAME_MAX - newFilenameLen,
+                                           "%s", opPos);
+
+                int ret = rename(evicted->fname, newFilename);
+                if (ret) {
+                  FATAL("Failed to rename %s to %s\n", evicted->fname, newFilename);
+                }
+
+                free(evicted->fname);
+                evicted->fname = newFilename;
               }
             }
           }
@@ -896,7 +916,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
     if (afl->ncd_based_queue) {
       // If there's an eviction then no new file will be created
-      if (evicted == NULL) {
+      if (!evicted) {
         queue_fn = alloc_printf(
             "%s/queue/id:%06u,cksum:%020llu,entry:%d,%s", afl->out_dir,
             afl->queued_paths, cksum,
@@ -986,6 +1006,9 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
       if (!evicted) {
         struct queue_entry *new = afl->queue_top;
         new->compressed_len = compressedLen;
+        new->testcase_buf = malloc(len);
+        memcpy(new->testcase_buf, mem, len);
+        new->len = len;
 
         if (pathPartitions == NULL) {
           struct path_partitions newPP = {.checksum = cksum, .foundPartitionsCount = 1};
@@ -1012,12 +1035,6 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 #endif
 
           pathPartitions->queue_entries[pathPartitions->foundPartitionsCount] = new;
-          printf("Entries: \n");
-          struct queue_entry *old = pathPartitions->queue_entries[0];
-          printf("0: {len: %d, compressedLen: %u}\n",
-                 old->len, old->compressed_len);
-          printf("new: {len: %d, compressedLen: %u}, actual: len: %u, compressedLen: %u\n",
-                 new->len, new->compressed_len, len, compressedLen);
           pathPartitions->foundPartitionsCount += 1;
         }
       }
@@ -1032,29 +1049,20 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 #endif
 
       if (pathPartitions->foundPartitionsCount > 1) {
-        printf("Entries before NCD set:\n");
-        struct path_partitions temp = {.foundPartitionsCount = pathPartitions->foundPartitionsCount};
-        for (int i = 0; i < pathPartitions->foundPartitionsCount; i++) {
-          printf("  %d: {len: %u, compressedLen: %u}\n", i, pathPartitions->queue_entries[i]->len, pathPartitions->queue_entries[i]->compressed_len);
-          temp.queue_entries[i] = pathPartitions->queue_entries[i];
-        }
-        printf("NCD before recalc: %0.05f (claimed %0.05f)\n", calc_NCD_for_path_partitions(afl, &temp), pathPartitions->normalised_compression_dist);
-
-        float oldNCD = pathPartitions->normalised_compression_dist;
-        pathPartitions->normalised_compression_dist = calc_NCD_for_path_partitions(afl, pathPartitions);
-
-        struct path_partitions sought = { .checksum = cksum };
-        struct path_partitions *found = hashmap_get(hashfuzzFoundPartitions, &sought);
-        printf("fetched from HASHMAP, NCD is %0.05f\n", calc_NCD_for_path_partitions(afl, found));
+        float newNCD = calc_NCD_for_path_partitions(afl, pathPartitions);
 
         if (evicted) {
-          printf("swapping out input for %s as old NCD = %0.05f, and new NCD = %0.05f [double checked: %0.05f]\n",
-                 (char *)evicted->fname, oldNCD,
-                 pathPartitions->normalised_compression_dist,
-                 calc_NCD_for_path_partitions(afl, pathPartitions));
-          return 1;
+          printf("swapped out entry for %020llu taking NCD from %0.05f to %0.05f\n",
+                 cksum, pathPartitions->normalised_compression_dist, newNCD);
         } else {
-          printf("Storing %s NCD: %0.05f\n", (char *)queue_fn, pathPartitions->normalised_compression_dist);
+          printf("Found alternative input for %020llu, initial NCD: %0.05f\n",
+                 cksum, newNCD);
+        }
+
+        pathPartitions->normalised_compression_dist = newNCD;
+
+        if (evicted) {
+          return 1;
         }
 #ifdef NOISY
         printf("new: buf: %p, len: %u, compressed_len: %d\n", new->testcase_buf, new->len, new->compressed_len);
