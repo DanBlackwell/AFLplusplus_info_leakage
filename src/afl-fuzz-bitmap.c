@@ -221,7 +221,7 @@ float calc_NCDm(afl_state_t *afl,
  * largest NCD, or -1 if the new_entry cannot beat any others */
 
 int find_eviction_candidate(afl_state_t *afl,
-                            struct queue_entry *existing_edge_entries[],
+                            struct queue_entry **existing_edge_entries,
                             int existing_entries_count,
                             struct queue_entry *new_entry) {
   if (existing_entries_count > 32) {
@@ -230,21 +230,40 @@ int find_eviction_candidate(afl_state_t *afl,
 
   struct queue_entry *all_entries[33];
 
+  float initialNCD = calc_NCDm(afl, existing_edge_entries, existing_entries_count);
+  printf("  Initial NCD: %f\n", initialNCD);
+
   int evictionCandidate = -1;
   float bestNCD = 0.0;
 
   for (int i = 0; i < existing_entries_count; i++) {
-    memcpy(all_entries, existing_edge_entries, sizeof(existing_edge_entries[0]) * i);
+    memcpy(all_entries, existing_edge_entries, sizeof(existing_edge_entries) * i);
     memcpy(all_entries + i,
            &existing_edge_entries[i + 1],
-           sizeof(existing_edge_entries[0]) * (existing_entries_count - 1 - i));
+           sizeof(existing_edge_entries) * (existing_entries_count - 1 - i));
     all_entries[existing_entries_count - 1] = new_entry;
 
-    float candidateNCD = calc_NCDm(afl, all_entries, existing_entries_count - 1);
+    float candidateNCD = calc_NCDm(afl, all_entries, existing_entries_count);
+    if (all_entries[0]->len != all_entries[1]->len) {
+      printf("  Finally non identical!\n");
+    } else {
+      for (u32 i = 0; i < all_entries[0]->len; i++) {
+        if (all_entries[0]->testcase_buf[i] != all_entries[1]->testcase_buf[i]) {
+          printf("  Finally non identical, differed on byte %d, %hhu vs %hhu\n", i,
+                 all_entries[0]->testcase_buf[i], all_entries[1]->testcase_buf[i]);
+        }
+      }
+    }
+    printf("    %d/%d: [%08X, %08X] %0.05f\n", i, existing_entries_count, *(u32 *)all_entries[0]->testcase_buf, *(u32 *)all_entries[1]->testcase_buf, candidateNCD);
     if (candidateNCD > bestNCD) {
       evictionCandidate = i;
       bestNCD = candidateNCD;
     }
+  }
+
+  printf("  Best candidate NCD: %f\n", bestNCD);
+  if (bestNCD <= initialNCD) {
+    return -1;
   }
 
   return evictionCandidate;
@@ -562,11 +581,11 @@ u8 is_interesting(afl_state_t *afl) {
           struct edge_entry *this_edge = &afl->edge_entries[edge_entries_pos];
 
           this_edge->hit_count++;
-          if (this_edge->hit_count <= 10) {
-            printf("Would add this entry for edge_num %hu, edge_frequency %hu, as hit count is %d\n",
-                   this_edge->edge_num, this_edge->edge_frequency, this_edge->hit_count);
-            return 1;
-          }
+//          if (this_edge->hit_count <= 10) {
+//            printf("Would add this entry for edge_num %hu, edge_frequency %hu, as hit count is %d\n",
+//                   this_edge->edge_num, this_edge->edge_frequency, this_edge->hit_count);
+//            return 1;
+//          }
 
 //          printf("At edgeNum: %d, rep count: %d, got edge entry: { edge_num: %hu, edge_reps: %hu }\n",
 //              edgeNum + i, restored[i], this_edge->edge_num, this_edge->edge_frequency);
@@ -591,6 +610,8 @@ u8 is_interesting(afl_state_t *afl) {
     current++;
     edgeNum += 4;
   }
+
+  return 1;
 
   return 0;
 }
@@ -675,20 +696,46 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry) {
           struct edge_entry *this_edge = &afl->edge_entries[edge_entries_pos];
           printf("Hit edge: %hu, bucket: %hu\n", this_edge->edge_num, this_edge->edge_frequency);
 
+          bool match = false;
+          for (int i = 0; i < this_edge->entry_count; i++) {
+            if (this_edge->entries[i]->len != q_entry->len) {
+              continue;
+            }
+
+            if (!memcmp(this_edge->entries[i]->testcase_buf, q_entry->testcase_buf, q_entry->len)) {
+              match = true;
+              break;
+            }
+          }
+
+          // we already have this entry in the queue
+          if (match) {
+            printf("  Identical to existing queue entry, skipping\n");
+            continue;
+          }
+
           if (this_edge->entry_count < afl->hashfuzz_partitions) {
             printf("  Inserting candidate w checksum %020llu at pos %d\n",
                    q_entry->exec_cksum, this_edge->entry_count);
-            this_edge->entries[this_edge->entry_count] = q_entry;
+            struct queue_entry *new = malloc(sizeof *q_entry);
+            memcpy(new, q_entry, sizeof *q_entry);
+            new->testcase_buf = malloc(new->len);
+//            memcpy(new->testcase_buf, q_entry->testcase_buf, new->len);
+//            new->fname = malloc(strlen(q_entry->fname) + 1);
+//            strcpy(new->fname, q_entry->fname);
+            
+            this_edge->entries[this_edge->entry_count] = new;
             this_edge->entry_count++;
             continue;
           }
 
-          bool should_calc_NCD = this_edge->hit_count <= 10 ||
-                                 (this_edge->hit_count <= 100 && this_edge->hit_count % 10 == 0) ||
-                                 (this_edge->hit_count <= 1000 && this_edge->hit_count % 100 == 0) ||
-                                 (this_edge->hit_count <= 10000 && this_edge->hit_count % 1000 == 0) ||
-                                 (this_edge->hit_count <= 100000 && this_edge->hit_count % 10000 == 0) ||
-                                 (this_edge->hit_count % 100000 == 0);
+          bool should_calc_NCD = true;
+//          bool should_calc_NCD = this_edge->hit_count <= 10 ||
+//                                 (this_edge->hit_count <= 100 && this_edge->hit_count % 10 == 0) ||
+//                                 (this_edge->hit_count <= 1000 && this_edge->hit_count % 100 == 0) ||
+//                                 (this_edge->hit_count <= 10000 && this_edge->hit_count % 1000 == 0) ||
+//                                 (this_edge->hit_count <= 100000 && this_edge->hit_count % 10000 == 0) ||
+//                                 (this_edge->hit_count % 100000 == 0);
 
           if (!should_calc_NCD) {
             printf("  hit count: %d, not going to check NCD\n", this_edge->hit_count);
@@ -1035,7 +1082,38 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     struct path_partitions *pathPartitions = NULL;
 
     // Dump out some trace debug info
-    is_interesting(afl);
+    if (is_interesting(afl)) {
+      if (2 * len > prevLongest) {
+        u32 bitcnt = 0, val = len;
+        while (val > 1) { bitcnt++; val >>= 1; }
+        prevLongest = 1 << (bitcnt + 2);  // round up to next power of 2
+
+        uncompressedData = realloc(uncompressedData, prevLongest);
+        if (!uncompressedData) printf("Realloc FAILED!\n");
+
+        maxCompressedLen = LZ4_compressBound((int)prevLongest);
+        compressedData = realloc(compressedData, maxCompressedLen);
+        if (!compressedData) printf("Realloc FAILED!\n");
+      }
+
+      compressedLen = LZ4_compress_default(mem, compressedData, (int)len, (int)maxCompressedLen);
+      if (!compressedLen) {
+        interesting = false;
+        PFATAL("Serious ERROR: compressedLen failed\n");
+      }
+
+      cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
+
+      struct queue_entry new = {
+          .testcase_buf = mem,
+          .len = len,
+          .compressed_len = compressedLen,
+          .exec_cksum = cksum,
+      };
+
+      save_to_edge_entries(afl, &new);
+
+    }
 
     /* Keep only if there are new bits in the map, add to queue for
        future fuzzing, etc. */
