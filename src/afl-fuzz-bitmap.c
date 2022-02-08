@@ -32,6 +32,318 @@
   #define NAME_MAX _XOPEN_NAME_MAX
 #endif
 
+static u32 prevLongest = 0;
+static u32 maxCompressedLen = 0;
+static u8 *uncompressedData = NULL;
+static u8 *compressedData = NULL;
+//#define NOISY
+
+float calc_NCD_raw_buffer(afl_state_t *afl,
+                          struct queue_entry *a,
+                          const u32 b_compressed_len,
+                          const void *b_buffer, u32 b_len) {
+
+  if (!a->compressed_len) {
+    u8 *input_buf = a->testcase_buf;
+
+    if (!input_buf) {
+      printf("Oops - missing buffer for a\n");
+      input_buf = queue_testcase_get(afl, a);
+    }
+
+    a->compressed_len = LZ4_compress_default(input_buf,
+                                             compressedData,
+                                             (int)a->len,
+                                             (int)maxCompressedLen);
+  }
+
+  memcpy(uncompressedData, a->testcase_buf, a->len);
+  memcpy(uncompressedData + a->len, b_buffer, b_len);
+  s32 concatCompressedLen = LZ4_compress_default(uncompressedData,
+                                                 compressedData,
+                                                 (int)(a->len + b_len),
+                                                 (int)maxCompressedLen);
+  // printf("Ok, got compressed: C(A): %d, C(B): %d, C(AB): %d\n", a->compressed_len, b->compressed_len, concatCompressedLen);
+
+  u32 min = a->compressed_len < b_compressed_len ?
+            a->compressed_len :
+            b_compressed_len;
+
+  u32 max = a->compressed_len > b_compressed_len ?
+            a->compressed_len :
+            b_compressed_len;
+
+  // don't divide by 0...
+  if (max == 0)
+    return 0;
+
+  return ((float)concatCompressedLen - (float)min) / (float)max;
+}
+
+float calc_NCD(afl_state_t *afl,
+               struct queue_entry *a,
+               struct queue_entry *b) {
+
+  if (!a->compressed_len || !b->testcase_buf) {
+    u8 *input_buf = a->testcase_buf;
+
+    if (!input_buf) {
+      printf("Oops - missing buffer for a\n");
+      input_buf = queue_testcase_get(afl, a);
+    }
+
+    a->compressed_len = LZ4_compress_default(input_buf,
+                                             compressedData,
+                                             (int)a->len,
+                                             (int)maxCompressedLen);
+  }
+
+  if (!b->compressed_len || !b->testcase_buf) {
+    u8 *input_buf = b->testcase_buf;
+
+    if (!input_buf) {
+      printf("Oops - missing buffer for b\n");
+      input_buf = queue_testcase_get(afl, b);
+    }
+
+    b->compressed_len = LZ4_compress_default(input_buf,
+                                             compressedData,
+                                             (int)b->len,
+                                             (int)maxCompressedLen);
+  }
+
+  memcpy(uncompressedData, a->testcase_buf, a->len);
+  memcpy(uncompressedData + a->len, b->testcase_buf, b->len);
+  s32 concatCompressedLen = LZ4_compress_default(uncompressedData,
+                                                 compressedData,
+                                                 (int)a->len + (int)b->len,
+                                                 (int)maxCompressedLen);
+  // printf("Ok, got compressed: C(A): %d, C(B): %d, C(AB): %d\n", a->compressed_len, b->compressed_len, concatCompressedLen);
+
+  u32 min = a->compressed_len < b->compressed_len ?
+            a->compressed_len :
+            b->compressed_len;
+
+  u32 max = a->compressed_len > b->compressed_len ?
+            a->compressed_len :
+            b->compressed_len;
+
+  // don't divide by 0...
+  if (max == 0)
+    return 0;
+
+  return ((float)concatCompressedLen - (float)min) / (float)max;
+}
+
+float calc_NCDm(afl_state_t *afl,
+               struct queue_entry *queue_entries[],
+               int queue_entries_count) {
+
+  u32 totalLen = 0;
+  u32 minCompressedLen = UINT32_MAX;
+
+  for (int i = 0; i < queue_entries_count; i++) {
+    struct queue_entry *entry = queue_entries[i];
+    totalLen += entry->len;
+
+    if (unlikely(!entry->compressed_len || !entry->testcase_buf)) {
+      u8 *input_buf = entry->testcase_buf;
+
+      if (!input_buf) {
+        printf("Oops - missing buffer for entry\n");
+        input_buf = queue_testcase_get(afl, entry);
+      }
+
+      entry->compressed_len = LZ4_compress_default(input_buf,
+                                                   compressedData,
+                                                   (int)entry->len,
+                                                   (int)maxCompressedLen);
+    }
+
+    if (entry->compressed_len < minCompressedLen) {
+      minCompressedLen = entry->compressed_len;
+    }
+  }
+
+  if (prevLongest < totalLen) {
+    u32 bitcnt = 0, val = totalLen;
+    while (val > 1) { bitcnt++; val >>= 1; }
+    prevLongest = 1 << (bitcnt + 2);  // round up to next power of 2
+
+    uncompressedData = realloc(uncompressedData, prevLongest);
+    if (!uncompressedData) printf("Realloc FAILED!\n");
+
+    maxCompressedLen = LZ4_compressBound((int)prevLongest);
+    compressedData = realloc(compressedData, maxCompressedLen);
+    if (!compressedData) printf("Realloc FAILED!\n");
+  }
+
+  u32 pos = 0;
+  for (int i = 0; i < queue_entries_count; i++) {
+    struct queue_entry *entry = queue_entries[i];
+    memcpy(uncompressedData + pos, entry->testcase_buf, entry->len);
+    pos += entry->len;
+  }
+  u32 fullSetCompressedLen = LZ4_compress_default(uncompressedData,
+                                                  compressedData,
+                                                  (int)pos,
+                                                  (int)maxCompressedLen);
+
+  u32 maxSubsetCompressedLen = 0;
+  for (int leftOut = 0; leftOut < queue_entries_count; leftOut++) {
+    int pos = 0;
+    for (int i = 0; i < queue_entries_count; i++) {
+      if (i == leftOut) continue;
+      struct queue_entry *entry = queue_entries[i];
+      memcpy(uncompressedData + pos, entry->testcase_buf, entry->len);
+      pos += entry->len;
+    }
+
+    u32 compressedLen = LZ4_compress_default(uncompressedData,
+                                             compressedData,
+                                             (int)pos,
+                                             (int)maxCompressedLen);
+
+    if (compressedLen > maxSubsetCompressedLen) {
+      maxSubsetCompressedLen = compressedLen;
+    }
+  }
+
+  // don't divide by 0...
+  if (maxSubsetCompressedLen == 0)
+    return 0;
+
+  return ((float)fullSetCompressedLen - (float)minCompressedLen) /
+         (float)maxSubsetCompressedLen;
+}
+
+/* Returns the index of the existing candidate that when replaced give the
+ * largest NCD, or -1 if the new_entry cannot beat any others */
+
+int find_eviction_candidate(afl_state_t *afl,
+                            struct queue_entry *existing_edge_entries[],
+                            int existing_entries_count,
+                            struct queue_entry *new_entry) {
+  if (existing_entries_count > 32) {
+    PFATAL("Cannot handle more than 32 entries\n");
+  }
+
+  struct queue_entry *all_entries[33];
+
+  int evictionCandidate = -1;
+  float bestNCD = 0.0;
+
+  for (int i = 0; i < existing_entries_count; i++) {
+    memcpy(all_entries, existing_edge_entries, sizeof(existing_edge_entries[0]) * i);
+    memcpy(all_entries + i,
+           &existing_edge_entries[i + 1],
+           sizeof(existing_edge_entries[0]) * (existing_entries_count - 1 - i));
+    all_entries[existing_entries_count - 1] = new_entry;
+
+    float candidateNCD = calc_NCDm(afl, all_entries, existing_entries_count - 1);
+    if (candidateNCD > bestNCD) {
+      evictionCandidate = i;
+      bestNCD = candidateNCD;
+    }
+  }
+
+  return evictionCandidate;
+}
+
+float calc_NCD_for_path_partitions(afl_state_t *afl,
+                                   const struct path_partitions *pathPartitions) {
+
+  if (pathPartitions->foundPartitionsCount != 2) {
+    PFATAL("I HAVEN'T IMPLEMENTED NCD FOR SETS (JUST PAIRS) YET (FOUND %d ENTRIES)!\n",
+           pathPartitions->foundPartitionsCount);
+  }
+
+#ifdef NOISY
+  printf("a: %p, b_compressed_len: %u, b_buffer = %p, b_len: %u\n",
+         pathPartitions->queue_entries[0],
+         pathPartitions->queue_entries[1]->compressed_len,
+         pathPartitions->queue_entries[1]->testcase_buf,
+         pathPartitions->queue_entries[1]->len);
+#endif
+
+  return calc_NCD(afl,
+                  pathPartitions->queue_entries[0],
+                  pathPartitions->queue_entries[1]);
+}
+
+
+struct queue_entry * isBetterEntry(afl_state_t *afl,
+                                   struct path_partitions *pathPartitions,
+                                   void *mem, u32 len,
+                                   u32 compressedLen) {
+  struct queue_entry *evictionCandidate = NULL;
+  float maxNCD = -1;
+  struct queue_entry new = {
+      .testcase_buf = mem,
+      .len = len,
+      .compressed_len = compressedLen
+  };
+
+#ifdef NOISY
+  float originalNCD = calc_NCD_for_path_partitions(afl, pathPartitions);
+#endif
+
+  for (int i = 0; i < pathPartitions->foundPartitionsCount; i++) {
+    struct queue_entry *existing = pathPartitions->queue_entries[i];
+    pathPartitions->queue_entries[i] = &new;
+    float ncd = calc_NCD_for_path_partitions(afl, pathPartitions);
+    pathPartitions->queue_entries[i] = existing;
+
+#ifdef  NOISY
+    printf("Calculated NCD for %020llu for new input against pathPartitions->queue_entries[%d] and got %0.05f\n",
+           pathPartitions->checksum, i, ncd);
+#endif
+
+    if (ncd > pathPartitions->normalised_compression_dist && ncd > maxNCD) {
+      evictionCandidate = existing;
+      maxNCD = ncd;
+#ifdef  NOISY
+      printf("NCD %0.05f beats %0.05f [original was %0.05f]\n", ncd, pathPartitions->normalised_compression_dist, originalNCD);
+      printf("new entry for %020llu beat pathPartitions->queue_entries[%d] NCD (was %0.05f, now: %0.05f)\n",
+             pathPartitions->checksum, i, pathPartitions->normalised_compression_dist, ncd);
+#endif
+    }
+  }
+
+  return evictionCandidate;
+}
+
+bool printPathPartition(const void *item, void *udata) {
+  const struct path_partitions *pp = item;
+  afl_state_t *afl = udata;
+
+  printf("{ %020llu: { ncd: %0.05f, queue_entries (indices): [", pp->checksum, pp->normalised_compression_dist);
+  for (int i = 0; i < pp->foundPartitionsCount; i++) {
+    for (u32 j = 0; j < afl->queued_paths; j++) {
+      if (afl->queue_buf[j] == pp->queue_entries[i]) {
+        printf("%d, ", j);
+        break;
+      }
+    }
+  }
+  printf("\b\b] } }\n");
+
+  return true;
+}
+
+void dumpOutDebugInfo(afl_state_t *afl) {
+  printf("queued_paths (indices): [");
+  for (u32 i = 0; i < afl->queued_paths; i++) {
+    if (!afl->queue_buf[i]->disabled)
+      printf("%d, ", i);
+  }
+  printf("\b\b]\n");
+
+  printf("PathPartitions:\n");
+  hashmap_scan(hashfuzzFoundPartitions, printPathPartition, afl);
+}
+
+
 /* Write bitmap to file. The bitmap is useful mostly for the secret
    -B option, to focus a separate fuzzing session on a particular
    interesting input without rediscovering all the others. */
@@ -166,15 +478,15 @@ const u8 simplify_lookup[256] = {
 
 const u8 count_class_lookup8[256] = {
 
-    [0] = 0,
-    [1] = 1,
-    [2] = 2,
-    [3] = 4,
-    [4] = TIMES4(8),
-    [8] = TIMES8(16),
-    [16] = TIMES16(32),
-    [32] = TIMES32(64),
-    [128] = TIMES64(128)
+        [0] = 0,
+        [1] = 1,
+        [2] = 2,
+        [3] = 4,
+        [4 ... 7] = 8,
+        [8 ... 15] = 16,
+        [16 ... 31] = 32,
+        [32 ... 127] = 64,
+        [128 ... 255] = 128
 
 };
 
@@ -188,7 +500,6 @@ const u8 count_class_lookup8[256] = {
 u16 count_class_lookup16[65536];
 
 void init_count_class16(void) {
-
   u32 b1, b2;
 
   for (b1 = 0; b1 < 256; b1++) {
@@ -201,7 +512,6 @@ void init_count_class16(void) {
     }
 
   }
-
 }
 
 /* Import coverage processing routines. */
@@ -211,6 +521,204 @@ void init_count_class16(void) {
 #else
   #include "coverage-32.h"
 #endif
+
+u8 is_interesting(afl_state_t *afl) {
+  if (!afl->edge_entry_count) {
+    printf("Skipping is_interesting as afl not yet inited\n");
+    return 0;
+  }
+
+#ifdef WORD_SIZE_64
+  u64 *current = (u64 *)afl->fsrv.trace_bits;
+  u32 i = (afl->fsrv.map_size >> 3);
+#else
+  I HAVE NOT IMPLEMENTED 32 BIT sorry
+#endif
+
+  printf("is_interesting: input %020llu [map size: %u]\n",
+         hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST), i);
+
+  int edgeNum = 0;
+  while (i--) {
+    if (*current) {
+      u16 mem16[4];
+      memcpy(mem16, current, sizeof(mem16));
+
+      mem16[0] = count_class_lookup16[mem16[0]];
+      mem16[1] = count_class_lookup16[mem16[1]];
+      mem16[2] = count_class_lookup16[mem16[2]];
+      mem16[3] = count_class_lookup16[mem16[3]];
+
+      for (int i = 0; i < 4; i++) {
+        if (mem16[i]) {
+          int reps = 0;
+          u16 class = mem16[i];
+          while ((class >> reps) > 1) reps++;
+
+          u16 restored[4];
+          memcpy(restored, current, sizeof(restored));
+
+          u32 edge_entries_pos = 16 * (edgeNum + i) + reps;
+          struct edge_entry *this_edge = &afl->edge_entries[edge_entries_pos];
+
+          this_edge->hit_count++;
+          if (this_edge->hit_count <= 10) {
+            printf("Would add this entry for edge_num %hu, edge_frequency %hu, as hit count is %d\n",
+                   this_edge->edge_num, this_edge->edge_frequency, this_edge->hit_count);
+            return 1;
+          }
+
+//          printf("At edgeNum: %d, rep count: %d, got edge entry: { edge_num: %hu, edge_reps: %hu }\n",
+//              edgeNum + i, restored[i], this_edge->edge_num, this_edge->edge_frequency);
+
+        }
+      }
+
+//      printf("  ");
+//      for (int i = 0; i < 4; i++) {
+//        printf("[%03d]: %04X, ", edgeNum + i, mem16[i]);
+//      }
+//      printf("\n");
+//
+//    } else {
+//      printf("  ");
+//      for (int i = 0; i < 4; i++) {
+//        printf("[%03d]: %04X, ", edgeNum + i, 0);
+//      }
+//      printf("\n");
+    }
+
+    current++;
+    edgeNum += 4;
+  }
+
+  return 0;
+}
+
+void swap_in_candidate(afl_state_t *afl, struct queue_entry *evictee, struct queue_entry *new) {
+  free(evictee->testcase_buf);
+  evictee->testcase_buf = new->testcase_buf;
+  evictee->len = new->len;
+  evictee->compressed_len = new->compressed_len;
+
+  int fd = open(evictee->fname, O_WRONLY | O_TRUNC, DEFAULT_PERMISSION);
+  if (unlikely(fd < 0)) { PFATAL("Unable to open '%s'", evictee->fname); }
+  ck_write(fd, evictee->testcase_buf, evictee->len, evictee->fname);
+  close(fd);
+
+  char *newFilename = malloc(NAME_MAX);
+  long newFilenameLen = 0;
+  char *opPos = strstr(evictee->fname, ",op:");
+  if (!opPos) {
+    FATAL("Failed to find \"op:\" in %s\n", evictee->fname);
+  }
+
+  char *updatedPos = strstr(evictee->fname, ",updated:");
+  if (updatedPos) {
+    newFilenameLen = updatedPos - (char *)evictee->fname;
+  } else {
+    newFilenameLen = opPos - (char *)evictee->fname;
+  }
+  memcpy(newFilename, evictee->fname, newFilenameLen);
+
+  newFilenameLen += snprintf(newFilename + newFilenameLen,
+                             NAME_MAX - newFilenameLen,
+                             ",updated:%llu",
+                             get_cur_time() + afl->prev_run_time - afl->start_time);
+  snprintf(newFilename + newFilenameLen,
+           NAME_MAX - newFilenameLen,
+           "%s", opPos);
+
+  int ret = rename(evictee->fname, newFilename);
+  if (ret) {
+    FATAL("Failed to rename %s to %s\n", evictee->fname, newFilename);
+  }
+
+  free(evictee->fname);
+  evictee->fname = newFilename;
+}
+
+u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry) {
+  if (unlikely(!afl->edge_entry_count)) {
+    printf("Skipping is_interesting as afl not yet inited\n");
+    return 0;
+  }
+
+#ifdef WORD_SIZE_64
+  u64 *current = (u64 *)afl->fsrv.trace_bits;
+  u32 i = (afl->fsrv.map_size >> 3);
+#else
+  I HAVE NOT IMPLEMENTED 32 BIT sorry
+#endif
+
+  int edgeNum = 0;
+  while (i--) {
+    if (*current) {
+      u16 mem16[4];
+      memcpy(mem16, current, sizeof(mem16));
+
+      mem16[0] = count_class_lookup16[mem16[0]];
+      mem16[1] = count_class_lookup16[mem16[1]];
+      mem16[2] = count_class_lookup16[mem16[2]];
+      mem16[3] = count_class_lookup16[mem16[3]];
+
+      for (int i = 0; i < 4; i++) {
+        if (mem16[i]) {
+          int reps = 0;
+          u16 class = mem16[i];
+          while ((class >> reps) > 1) reps++;
+
+          u16 restored[4];
+          memcpy(restored, current, sizeof(restored));
+
+          u32 edge_entries_pos = 16 * (edgeNum + i) + reps;
+          struct edge_entry *this_edge = &afl->edge_entries[edge_entries_pos];
+          printf("Hit edge: %hu, bucket: %hu\n", this_edge->edge_num, this_edge->edge_frequency);
+
+          if (this_edge->entry_count < afl->hashfuzz_partitions) {
+            printf("  Inserting candidate w checksum %020llu at pos %d\n",
+                   q_entry->exec_cksum, this_edge->entry_count);
+            this_edge->entries[this_edge->entry_count] = q_entry;
+            this_edge->entry_count++;
+            continue;
+          }
+
+          bool should_calc_NCD = this_edge->hit_count <= 10 ||
+                                 (this_edge->hit_count <= 100 && this_edge->hit_count % 10 == 0) ||
+                                 (this_edge->hit_count <= 1000 && this_edge->hit_count % 100 == 0) ||
+                                 (this_edge->hit_count <= 10000 && this_edge->hit_count % 1000 == 0) ||
+                                 (this_edge->hit_count <= 100000 && this_edge->hit_count % 10000 == 0) ||
+                                 (this_edge->hit_count % 100000 == 0);
+
+          if (!should_calc_NCD) {
+            printf("  hit count: %d, not going to check NCD\n", this_edge->hit_count);
+          } else {
+            int evictionCandidate = find_eviction_candidate(afl,
+                                                            this_edge->entries,
+                                                            this_edge->entry_count,
+                                                            q_entry);
+
+            if (evictionCandidate == -1) {
+              printf("  didn't beat out any existing candidates - boring\n");
+              continue;
+            }
+
+            // We have a real candidate to evict...
+            struct queue_entry *evictee = this_edge->entries[evictionCandidate];
+            printf("  Will evict candidate at pos %d, w checksum %020llu in favour of current w checksum %020llu\n",
+                   evictionCandidate, evictee->exec_cksum, q_entry->exec_cksum);
+            swap_in_candidate(afl, evictee, q_entry);
+          }
+        }
+      }
+    }
+
+    current++;
+    edgeNum += 4;
+  }
+
+  return 0;
+}
 
 /* Check if the current execution path brings anything new to the table.
    Update virgin bits to reflect the finds. Returns 1 if the only change is
@@ -486,201 +994,6 @@ s8 check_if_new_partition(u64 checksum, u8 partition) {
   return 0;
 }
 
-static u32 prevLongest = 0;
-static u32 maxCompressedLen = 0;
-static u8 *uncompressedData = NULL;
-static u8 *compressedData = NULL;
-//#define NOISY
-
-float calc_NCD_raw_buffer(afl_state_t *afl,
-                          struct queue_entry *a,
-                          const u32 b_compressed_len,
-                          const void *b_buffer, u32 b_len) {
-
-  if (!a->compressed_len) {
-    u8 *input_buf = a->testcase_buf;
-
-    if (!input_buf) {
-      printf("Oops - missing buffer for a\n");
-      input_buf = queue_testcase_get(afl, a);
-    }
-
-    a->compressed_len = LZ4_compress_default(input_buf,
-                                             compressedData,
-                                             (int)a->len,
-                                             (int)maxCompressedLen);
-  }
-
-  memcpy(uncompressedData, a->testcase_buf, a->len);
-  memcpy(uncompressedData + a->len, b_buffer, b_len);
-  s32 concatCompressedLen = LZ4_compress_default(uncompressedData,
-                                                 compressedData,
-                                                 (int)(a->len + b_len),
-                                                 (int)maxCompressedLen);
-  // printf("Ok, got compressed: C(A): %d, C(B): %d, C(AB): %d\n", a->compressed_len, b->compressed_len, concatCompressedLen);
-
-  u32 min = a->compressed_len < b_compressed_len ?
-                                                 a->compressed_len :
-                                                 b_compressed_len;
-
-  u32 max = a->compressed_len > b_compressed_len ?
-                                                 a->compressed_len :
-                                                 b_compressed_len;
-
-  // don't divide by 0...
-  if (max == 0)
-    return 0;
-
-  return ((float)concatCompressedLen - (float)min) / (float)max;
-}
-
-float calc_NCD(afl_state_t *afl,
-               struct queue_entry *a,
-               struct queue_entry *b) {
-
-  if (!a->compressed_len || !b->testcase_buf) {
-    u8 *input_buf = a->testcase_buf;
-
-    if (!input_buf) {
-      printf("Oops - missing buffer for a\n");
-      input_buf = queue_testcase_get(afl, a);
-    }
-
-    a->compressed_len = LZ4_compress_default(input_buf,
-                                             compressedData,
-                                             (int)a->len,
-                                             (int)maxCompressedLen);
-  }
-
-  if (!b->compressed_len || !b->testcase_buf) {
-    u8 *input_buf = b->testcase_buf;
-
-    if (!input_buf) {
-      printf("Oops - missing buffer for b\n");
-      input_buf = queue_testcase_get(afl, b);
-    }
-
-    b->compressed_len = LZ4_compress_default(input_buf,
-                                             compressedData,
-                                             (int)b->len,
-                                             (int)maxCompressedLen);
-  }
-
-  memcpy(uncompressedData, a->testcase_buf, a->len);
-  memcpy(uncompressedData + a->len, b->testcase_buf, b->len);
-  s32 concatCompressedLen = LZ4_compress_default(uncompressedData,
-                                                 compressedData,
-                                                 (int)a->len + (int)b->len,
-                                                 (int)maxCompressedLen);
-  // printf("Ok, got compressed: C(A): %d, C(B): %d, C(AB): %d\n", a->compressed_len, b->compressed_len, concatCompressedLen);
-
-  u32 min = a->compressed_len < b->compressed_len ?
-            a->compressed_len :
-            b->compressed_len;
-
-  u32 max = a->compressed_len > b->compressed_len ?
-            a->compressed_len :
-            b->compressed_len;
-
-  // don't divide by 0...
-  if (max == 0)
-    return 0;
-
-  return ((float)concatCompressedLen - (float)min) / (float)max;
-}
-
-float calc_NCD_for_path_partitions(afl_state_t *afl,
-                                   const struct path_partitions *pathPartitions) {
-
-  if (pathPartitions->foundPartitionsCount != 2) {
-    PFATAL("I HAVEN'T IMPLEMENTED NCD FOR SETS (JUST PAIRS) YET (FOUND %d ENTRIES)!\n",
-           pathPartitions->foundPartitionsCount);
-  }
-
-#ifdef NOISY
-  printf("a: %p, b_compressed_len: %u, b_buffer = %p, b_len: %u\n",
-         pathPartitions->queue_entries[0],
-         pathPartitions->queue_entries[1]->compressed_len,
-         pathPartitions->queue_entries[1]->testcase_buf,
-         pathPartitions->queue_entries[1]->len);
-#endif
-
-  return calc_NCD(afl,
-                  pathPartitions->queue_entries[0],
-                  pathPartitions->queue_entries[1]);
-}
-
-
-struct queue_entry * isBetterEntry(afl_state_t *afl,
-                                   struct path_partitions *pathPartitions,
-                                   void *mem, u32 len,
-                                   u32 compressedLen) {
-  struct queue_entry *evictionCandidate = NULL;
-  float maxNCD = -1;
-  struct queue_entry new = {
-      .testcase_buf = mem,
-      .len = len,
-      .compressed_len = compressedLen
-  };
-
-#ifdef NOISY
-  float originalNCD = calc_NCD_for_path_partitions(afl, pathPartitions);
-#endif
-
-  for (int i = 0; i < pathPartitions->foundPartitionsCount; i++) {
-    struct queue_entry *existing = pathPartitions->queue_entries[i];
-    pathPartitions->queue_entries[i] = &new;
-    float ncd = calc_NCD_for_path_partitions(afl, pathPartitions);
-    pathPartitions->queue_entries[i] = existing;
-
-#ifdef  NOISY
-    printf("Calculated NCD for %020llu for new input against pathPartitions->queue_entries[%d] and got %0.05f\n",
-           pathPartitions->checksum, i, ncd);
-#endif
-
-    if (ncd > pathPartitions->normalised_compression_dist && ncd > maxNCD) {
-      evictionCandidate = existing;
-      maxNCD = ncd;
-#ifdef  NOISY
-      printf("NCD %0.05f beats %0.05f [original was %0.05f]\n", ncd, pathPartitions->normalised_compression_dist, originalNCD);
-      printf("new entry for %020llu beat pathPartitions->queue_entries[%d] NCD (was %0.05f, now: %0.05f)\n",
-             pathPartitions->checksum, i, pathPartitions->normalised_compression_dist, ncd);
-#endif
-    }
-  }
-
-  return evictionCandidate;
-}
-
-bool printPathPartition(const void *item, void *udata) {
-  const struct path_partitions *pp = item;
-  afl_state_t *afl = udata;
-
-  printf("{ %020llu: { ncd: %0.05f, queue_entries (indices): [", pp->checksum, pp->normalised_compression_dist);
-  for (int i = 0; i < pp->foundPartitionsCount; i++) {
-    for (u32 j = 0; j < afl->queued_paths; j++) {
-      if (afl->queue_buf[j] == pp->queue_entries[i]) {
-        printf("%d, ", j);
-        break;
-      }
-    }
-  }
-  printf("\b\b] } }\n");
-
-  return true;
-}
-
-void dumpOutDebugInfo(afl_state_t *afl) {
-  printf("queued_paths (indices): [");
-  for (u32 i = 0; i < afl->queued_paths; i++) {
-    if (!afl->queue_buf[i]->disabled)
-      printf("%d, ", i);
-  }
-  printf("\b\b]\n");
-
-  printf("PathPartitions:\n");
-  hashmap_scan(hashfuzzFoundPartitions, printPathPartition, afl);
-}
 
 /* Check if the result of an execve() during routine fuzzing is interesting,
    save or queue the input test case for further analysis if so. Returns 1 if
@@ -721,6 +1034,9 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     struct queue_entry *evicted = NULL;
     struct path_partitions *pathPartitions = NULL;
 
+    // Dump out some trace debug info
+    is_interesting(afl);
+
     /* Keep only if there are new bits in the map, add to queue for
        future fuzzing, etc. */
 
@@ -729,6 +1045,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
     if (afl->ncd_based_queue) {
       if (afl->hashfuzz_is_input_based) {
+
         cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
 
         struct path_partitions sought = { .checksum = cksum };

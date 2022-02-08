@@ -201,6 +201,19 @@ struct queue_entry {
 
 };
 
+struct edge_entry {
+  u16 edge_num;                     /* The number of this edge in the bitmap */
+  u16 edge_frequency;        /* The _ceiled_ number of times the edge is hit */
+
+  u32 hit_count;            /* Number of generated inputs covering this edge */
+
+  u8 entry_count;         /* Number of stored entries we have for this input */
+  struct queue_entry *entries[8];      /* Stored queue_entries for this edge */
+
+  float normalised_compression_dist;    /* NCD for all current entries       */
+
+};
+
 struct extra_data {
 
   u8 *data;                             /* Dictionary token data            */
@@ -632,6 +645,9 @@ typedef struct afl_state {
 #ifdef HAVE_AFFINITY
   s32 cpu_aff;                          /* Selected CPU core                */
 #endif                                                     /* HAVE_AFFINITY */
+
+  struct edge_entry *edge_entries;     /* list of edge_entry for run        */
+  u32 edge_entry_count;                /* number of edge_entries            */
 
   struct queue_entry *queue,            /* Fuzzing queue (linked list)      */
       *queue_cur,                       /* Current offset within the queue  */

@@ -1330,6 +1330,21 @@ int main(int argc, char **argv_orig, char **envp) {
         NULL, NULL);
   }
 
+  if (afl->ncd_based_queue) {
+#ifdef WORD_SIZE_64
+      printf("Initing edge_entry_count to %d, allocating: %lu bytes\n", map_size, map_size * sizeof(struct edge_entry));
+      fflush(stdout);
+      afl->edge_entry_count = map_size;
+      afl->edge_entries = ck_alloc(afl->edge_entry_count * sizeof(struct edge_entry));
+      for (size_t i = 0; i < map_size; i++) {
+          afl->edge_entries[i].edge_num = i / 16;
+          afl->edge_entries[i].edge_frequency = 1 << (i % 16);
+      }
+#else
+      I HAVE NOT IMPLEMENTED 32 BIT sorry
+  #endif
+  }
+
   ACTF("Getting to work...");
 
   switch (afl->schedule) {
