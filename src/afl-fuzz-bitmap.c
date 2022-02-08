@@ -719,7 +719,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
             continue;
           }
 
-          if (this_edge->entry_count < afl->hashfuzz_partitions) {
+          if (this_edge->entry_count < afl->ncd_entries_per_edge) {
 #ifdef NOISY
             printf("  Inserting candidate w checksum %020llu at pos %d\n",
                    q_entry->exec_cksum, this_edge->entry_count);

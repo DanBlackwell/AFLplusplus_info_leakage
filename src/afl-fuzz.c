@@ -444,7 +444,7 @@ int main(int argc, char **argv_orig, char **envp) {
 
   while ((opt = getopt(
               argc, argv,
-              "+b:B:c:CdDe:E:hH:i:I:f:F:l:kL:m:M:nNOo:P:p:r:RQs:S:t:T:UV:Wx:Z")) > 0) {
+              "+b:B:c:CdDe:E:hH:i:I:f:F:l:kL:m:M:nN:Oo:P:p:r:RQs:S:t:T:UV:Wx:Z")) > 0) {
 
     switch (opt) {
 
@@ -860,8 +860,18 @@ int main(int argc, char **argv_orig, char **envp) {
       case 'N':                                             /* NCD based queue */
 
         afl->ncd_based_queue = true;
-        afl->hashfuzz_is_input_based = true;
-        afl->hashfuzz_partitions = 2;
+
+        u8 p;
+
+        if (!optarg ||
+            sscanf(optarg, "%hhu", &p) < 1 ||
+            (p < 2 || p > 32)) {
+
+          FATAL("Bad syntax used for -N (expected an int between 2 and 32 e.g. '-N 3')");
+
+        }
+
+        afl->ncd_entries_per_edge = p;
 
         break;
 
@@ -1183,6 +1193,12 @@ int main(int argc, char **argv_orig, char **envp) {
   if (afl->hashfuzz_enabled && afl->ncd_based_queue) {
 
     FATAL("You can't use hashfuzz (-H) and NCD based queue (-N) together!");
+
+  }
+
+  if (afl->ncd_based_queue && afl->ncd_entries_per_edge == 0) {
+
+    FATAL("You must set a number with -N flag");
 
   }
 

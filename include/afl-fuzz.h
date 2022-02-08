@@ -543,7 +543,8 @@ typedef struct afl_state {
       hashfuzz_is_input_based,          /* is hashfuzz operating over inputs? */
       hashfuzz_mimic_transformation,    /* mimic the transformation from the original paper */
       hashfuzz_partitions,              /* number of hashfuzz partitions    */
-      ncd_based_queue;                  /* are we using NCD queue?          */
+      ncd_based_queue,                  /* are we using NCD queue?          */
+      ncd_entries_per_edge;          /* number of entries to store per edge */
 
   u32 hashfuzz_reset_period;            /* number of executions between resets */
   u64 hashfuzz_discovered_partitions;   /* bit-fields marking discovered hashfuzz partitions */
