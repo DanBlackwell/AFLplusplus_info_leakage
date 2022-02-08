@@ -210,6 +210,8 @@ struct edge_entry {
   u8 entry_count;         /* Number of stored entries we have for this input */
   struct queue_entry *entries[8];      /* Stored queue_entries for this edge */
 
+  u32 replacement_count;          /* Number of times an entry was swapped in */
+
   float normalised_compression_dist;    /* NCD for all current entries       */
 
 };

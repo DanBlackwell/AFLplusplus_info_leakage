@@ -695,6 +695,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
 
           u32 edge_entries_pos = 16 * (edgeNum + i) + reps;
           struct edge_entry *this_edge = &afl->edge_entries[edge_entries_pos];
+          this_edge->hit_count++;
 #ifdef NOISY
           printf("Hit edge: %hu, bucket: %hu\n", this_edge->edge_num, this_edge->edge_frequency);
 #endif
@@ -743,6 +744,8 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
 
             this_edge->entries[this_edge->entry_count] = new;
             this_edge->entry_count++;
+
+            this_edge->normalised_compression_dist = calc_NCDm(afl, this_edge->entries, this_edge->entry_count);
             continue;
           }
 
@@ -773,6 +776,9 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
                    evictionCandidate, evictee->exec_cksum, q_entry->exec_cksum);
 #endif
             swap_in_candidate(afl, evictee, q_entry);
+
+            this_edge->replacement_count++;
+            this_edge->normalised_compression_dist = calc_NCDm(afl, this_edge->entries, this_edge->entry_count);
           }
         }
       }

@@ -1205,7 +1205,7 @@ int main(int argc, char **argv_orig, char **envp) {
   if (afl->hashfuzz_enabled && !afl->hashfuzz_partitions) {
 
     FATAL("If using hashfuzz (-H), you must also specify the number of partitions with -P");
-    
+
   }
 
   if (!afl->hashfuzz_mimic_transformation && !afl->hashfuzz_enabled) {
@@ -2384,6 +2384,30 @@ stop_fuzzing:
 
   afl->force_ui_update = 1;  // ensure the screen is reprinted
   show_stats(afl);           // print the screen one last time
+
+  if (afl->ncd_based_queue) {
+    printf("\n===============================================\n");
+    printf("Dumping NCD based edge stats\n");
+    u16 last_edge = 0;
+    bool printed_edge_num = false;
+    for (u32 i = 0; i < afl->edge_entry_count; i++) {
+      struct edge_entry *entry = &afl->edge_entries[i];
+      if (entry->edge_num != last_edge) {
+        printed_edge_num = false;
+        last_edge = entry->edge_num;
+      }
+
+      if (entry->entry_count) {
+        if (!printed_edge_num) { printf("Edge %hu:\n", last_edge); printed_edge_num = true; }
+
+        printf("  hits: %05hu, entries: %d, NCD: %0.05f, hit_bucket: %u, entry_replacements: %u\n",
+               entry->edge_frequency, entry->entry_count,
+               entry->normalised_compression_dist, entry->hit_count,
+               entry->replacement_count);
+      }
+    }
+    printf("===============================================\n");
+  }
 
   SAYF(CURSOR_SHOW cLRD "\n\n+++ Testing aborted %s +++\n" cRST,
        afl->stop_soon == 2 ? "programmatically" : "by user");
