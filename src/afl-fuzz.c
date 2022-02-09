@@ -2400,8 +2400,22 @@ stop_fuzzing:
       if (entry->entry_count) {
         if (!printed_edge_num) { printf("Edge %hu:\n", last_edge); printed_edge_num = true; }
 
-        printf("  hits: %05hu, entries: %d, NCD: %0.05f, hit_bucket: %u, entry_replacements: %u\n",
+        int unique_checksums = 0;
+        for (int i = 0; i < entry->entry_count; i++) {
+          bool unique = true;
+          for (int j = 0; j < entry->entry_count; j++) {
+            if (i == j) continue;
+            if (entry->entries[i]->exec_cksum == entry->entries[j]->exec_cksum) {
+              unique = false;
+              break;
+            }
+          }
+          if (unique) unique_checksums++;
+        }
+
+        printf("  hit_bucket: %05hu, entries: %d, unique_checksums: %d, NCD: %0.05f, hits: %u, entry_replacements: %u\n",
                entry->edge_frequency, entry->entry_count,
+               unique_checksums,
                entry->normalised_compression_dist, entry->hit_count,
                entry->replacement_count);
       }
