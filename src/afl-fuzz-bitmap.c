@@ -221,6 +221,7 @@ float calc_NCDm(afl_state_t *afl,
  * largest NCD, or -1 if the new_entry cannot beat any others */
 
 int find_eviction_candidate(afl_state_t *afl,
+                            float existing_entries_NCD,
                             struct queue_entry **existing_edge_entries,
                             int existing_entries_count,
                             struct queue_entry *new_entry) {
@@ -230,10 +231,8 @@ int find_eviction_candidate(afl_state_t *afl,
 
   struct queue_entry *all_entries[33];
 
-  float initialNCD = calc_NCDm(afl, existing_edge_entries, existing_entries_count);
-
   int evictionCandidate = -1;
-  float bestNCD = initialNCD;
+  float bestNCD = existing_entries_NCD;
 
   for (int i = 0; i < existing_entries_count; i++) {
     memcpy(all_entries, existing_edge_entries, sizeof(existing_edge_entries) * i);
@@ -252,7 +251,7 @@ int find_eviction_candidate(afl_state_t *afl,
 #ifdef NOISY
   printf("  New best candidate NCD: %0.05f [was: %0.05f]\n", bestNCD, initialNCD);
 #endif
-  if (bestNCD <= initialNCD) {
+  if (bestNCD <= existing_entries_NCD) {
     return -1;
   }
 
@@ -749,18 +748,19 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
             continue;
           }
 
-          bool should_calc_NCD = true;
-//          bool should_calc_NCD = this_edge->hit_count <= 10 ||
-//                                 (this_edge->hit_count <= 100 && this_edge->hit_count % 10 == 0) ||
-//                                 (this_edge->hit_count <= 1000 && this_edge->hit_count % 100 == 0) ||
-//                                 (this_edge->hit_count <= 10000 && this_edge->hit_count % 1000 == 0) ||
-//                                 (this_edge->hit_count <= 100000 && this_edge->hit_count % 10000 == 0) ||
-//                                 (this_edge->hit_count % 100000 == 0);
+//          bool should_calc_NCD = true;
+          bool should_calc_NCD = this_edge->hit_count <= 10 ||
+                                 (this_edge->hit_count <= 100 && this_edge->hit_count % 10 == 0) ||
+                                 (this_edge->hit_count <= 1000 && this_edge->hit_count % 100 == 0) ||
+                                 (this_edge->hit_count <= 10000 && this_edge->hit_count % 1000 == 0) ||
+                                 (this_edge->hit_count <= 100000 && this_edge->hit_count % 10000 == 0) ||
+                                 (this_edge->hit_count % 100000 == 0);
 
           if (!should_calc_NCD) {
-            printf("  hit count: %d, not going to check NCD\n", this_edge->hit_count);
+//            printf("  hit count: %d, not going to check NCD\n", this_edge->hit_count);
           } else {
             int evictionCandidate = find_eviction_candidate(afl,
+                                                            this_edge->normalised_compression_dist,
                                                             this_edge->entries,
                                                             this_edge->entry_count,
                                                             q_entry);
