@@ -400,6 +400,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
       if (el->afl_custom_queue_get &&
           !el->afl_custom_queue_get(el->data, afl->queue_cur->fname)) {
 
+        printf("BAIL 2\n");
         return 1;
 
       }
@@ -414,13 +415,13 @@ u8 fuzz_one_original(afl_state_t *afl) {
        possibly skip to them at the expense of already-fuzzed or non-favored
        cases. */
 
-    if (((afl->queue_cur->was_fuzzed > 0 || afl->queue_cur->fuzz_level > 0) ||
-         !afl->queue_cur->favored) &&
-        likely(rand_below(afl, 100) < SKIP_TO_NEW_PROB)) {
-
-      return 1;
-
-    }
+//    if (((afl->queue_cur->was_fuzzed > 0 || afl->queue_cur->fuzz_level > 0) ||
+//         !afl->queue_cur->favored) &&
+//        likely(rand_below(afl, 100) < SKIP_TO_NEW_PROB)) {
+//
+//      return 1;
+//
+//    }
 
   } else if (!afl->non_instrumented_mode && !afl->queue_cur->favored &&
 
@@ -433,11 +434,11 @@ u8 fuzz_one_original(afl_state_t *afl) {
     if (afl->queue_cycle > 1 &&
         (afl->queue_cur->fuzz_level == 0 || afl->queue_cur->was_fuzzed)) {
 
-      if (likely(rand_below(afl, 100) < SKIP_NFAV_NEW_PROB)) { return 1; }
+    if (likely(rand_below(afl, 100) < SKIP_NFAV_NEW_PROB)) { printf("BAIL 3\n"); return 1; }
 
     } else {
 
-      if (likely(rand_below(afl, 100) < SKIP_NFAV_OLD_PROB)) { return 1; }
+      if (likely(rand_below(afl, 100) < SKIP_NFAV_OLD_PROB)) {  printf("BAIL 4\n");return 1; }
 
     }
 
@@ -494,6 +495,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
     if (unlikely(afl->stop_soon) || res != afl->crash_mode) {
 
       ++afl->cur_skipped_paths;
+      printf("BAIL 5\n");
       goto abandon_entry;
 
     }
@@ -542,13 +544,13 @@ u8 fuzz_one_original(afl_state_t *afl) {
    * PERFORMANCE SCORE *
    *********************/
 
-  if (likely(!afl->old_seed_selection))
+if (!afl->ncd_based_queue && likely(!afl->old_seed_selection))
     orig_perf = perf_score = afl->queue_cur->perf_score;
   else
     afl->queue_cur->perf_score = orig_perf = perf_score =
         calculate_score(afl, afl->queue_cur);
 
-  if (unlikely(perf_score <= 0)) { goto abandon_entry; }
+  if (unlikely(perf_score <= 0)) {  printf("BAIL 6, perf_score = %u\n", perf_score); goto abandon_entry; }
 
   if (unlikely(afl->shm.cmplog_mode &&
                afl->queue_cur->colorized < afl->cmplog_lvl &&
@@ -568,6 +570,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
         if (input_to_state_stage(afl, in_buf, out_buf, len)) {
 
+          printf("BAIL 1\n");
           goto abandon_entry;
 
         }
@@ -642,7 +645,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
              afl->queue_cur->fname, afl->stage_cur);
 #endif
 
-    if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+    if (common_fuzz_stuff(afl, out_buf, len)) {  printf("BAIL 7\n"); goto abandon_entry; }
 
     FLIP_BIT(out_buf, afl->stage_cur);
 
@@ -2027,16 +2030,25 @@ havoc_stage:
   int latest_hit_cnt = afl->queued_paths + afl->unique_crashes;
   int entries = 1;
 
-  bool splitFuzzTime = (afl->hashfuzz_enabled && !afl->hashfuzz_mimic_transformation);
+  bool splitFuzzTime = afl->ncd_based_queue ||
+                       (afl->hashfuzz_enabled && !afl->hashfuzz_mimic_transformation);
   if (splitFuzzTime) {
-    struct path_partitions  sought = {.checksum = afl->queue_cur->exec_cksum};
-    struct path_partitions *found = hashmap_get(hashfuzzFoundPartitions, &sought);
-
-    if (found) {
-      // This input discovers a new partition for this path
-      entries = found->foundPartitionsCount;
+    if (afl->ncd_based_queue) {
+      // If we're just starting the campaign there won't be a cur_edge yet!
+      if (afl->cur_edge) {
+        entries = afl->cur_edge->entry_count;
+      }
     } else {
-      printf("WTF fuzz_one_input failed to find an entry for %020llu\n", sought.checksum);
+      struct path_partitions  sought = {.checksum = afl->queue_cur->exec_cksum};
+      struct path_partitions *found =
+          hashmap_get(hashfuzzFoundPartitions, &sought);
+
+      if (found) {
+        // This input discovers a new partition for this path
+        entries = found->foundPartitionsCount;
+      } else {
+        printf("WTF fuzz_one_input failed to find an entry for %020llu\n", sought.checksum);
+      }
     }
   }
 
@@ -2044,16 +2056,22 @@ havoc_stage:
 
     if (splitFuzzTime &&
         afl->queued_paths + afl->unique_crashes - latest_hit_cnt > 0) {
-      latest_hit_cnt = afl->queued_paths + afl->unique_crashes;
-
-      struct path_partitions  sought = {.checksum = afl->queue_cur->exec_cksum};
-      struct path_partitions *found = hashmap_get(hashfuzzFoundPartitions, &sought);
-
-      if (found) {
-        // This input discovers a new partition for this path
-        entries = found->foundPartitionsCount;
+      if (afl->ncd_based_queue) {
+        if (afl->cur_edge) {
+          entries = afl->cur_edge->entry_count;
+        }
       } else {
-        printf("WTF fuzz_one_input failed to find an entry for %020llu\n", sought.checksum);
+        latest_hit_cnt = afl->queued_paths + afl->unique_crashes;
+
+        struct path_partitions  sought = {.checksum = afl->queue_cur->exec_cksum};
+        struct path_partitions *found = hashmap_get(hashfuzzFoundPartitions, &sought);
+
+        if (found) {
+          // This input discovers a new partition for this path
+          entries = found->foundPartitionsCount;
+        } else {
+          printf("WTF fuzz_one_input failed to find an entry for %020llu\n", sought.checksum);
+        }
       }
     }
 

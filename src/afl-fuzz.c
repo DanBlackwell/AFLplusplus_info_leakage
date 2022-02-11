@@ -2092,8 +2092,8 @@ int main(int argc, char **argv_orig, char **envp) {
 
   while (likely(!afl->stop_soon)) {
 
-		// Used to keep track of whether fuzzer needs resetting
-		static u64 last_multiple = 0;
+    // Used to keep track of whether fuzzer needs resetting
+    static u64 last_multiple = 0;
 
     if (afl->hashfuzz_reset_period &&
         afl->fsrv.total_execs > 0 && 
@@ -2111,6 +2111,7 @@ int main(int argc, char **argv_orig, char **envp) {
 
     cull_queue(afl);
 
+    printf("Runs in current cycle %u, queue: %u\n", runs_in_current_cycle, afl->queued_paths);
     if (unlikely((!afl->old_seed_selection &&
                   runs_in_current_cycle > afl->queued_paths) ||
                  (afl->old_seed_selection && !afl->queue_cur))) {
@@ -2121,6 +2122,12 @@ int main(int argc, char **argv_orig, char **envp) {
 
         sync_fuzzers(afl);
 
+      }
+
+      if (afl->ncd_based_queue) {
+        for (u32 i = 0; i < afl->edge_entry_count; i++) {
+          afl->edge_entries[i].fuzzed_this_cycle = 0;
+        }
       }
 
       ++afl->queue_cycle;
@@ -2306,7 +2313,79 @@ int main(int argc, char **argv_orig, char **envp) {
 
     do {
 
-      if (likely(!afl->old_seed_selection)) {
+      static u64 last_select = 0;
+      u64 execs_since_last = afl->fsrv.total_execs - last_select;
+      printf("Selecting new fuzzing entry: %llu execs\n", execs_since_last);
+      last_select = afl->fsrv.total_execs;
+
+      if (afl->ncd_based_queue) {
+        static int last_fuzzed_entry = 0;
+        bool exhausted_edge = (afl->cur_edge == NULL);
+
+        if (!exhausted_edge) {
+          if (last_fuzzed_entry >= afl->cur_edge->entry_count - 1) {
+            exhausted_edge = true;
+          } else {
+            last_fuzzed_entry++;
+            afl->queue_cur = afl->cur_edge->entries[last_fuzzed_entry];
+          }
+        }
+
+        if (exhausted_edge) {
+          struct edge_entry *best = NULL;
+          u32 best_pos = UINT32_MAX;
+          double best_rarity = 0.0;
+
+          for (u32 i = 0; i < afl->edge_entry_count; i++) {
+            struct edge_entry *entry = &afl->edge_entries[i];
+            if (!entry->fuzzed_this_cycle && entry->discovery_execs) {
+              if (execs_since_last) {
+                u64 execs_since = afl->fsrv.total_execs - entry->discovery_execs;
+                entry->execs_per_hit = (float)execs_since / entry->hit_count;
+              }
+
+              if (entry->execs_per_hit > best_rarity) {
+                best_rarity = entry->execs_per_hit;
+                best = entry;
+                best_pos = i;
+              }
+            }
+          }
+
+          if (!best) {
+            if (afl->queued_discovered == 0) {
+              afl->current_entry = 0;
+              afl->queue_cur = afl->queue_buf[afl->current_entry];
+            } else {
+              PFATAL("Failed to find any good entries");
+            }
+          } else {
+            printf("Selected edge %u with rarity: %f for fuzzing\n", best_pos, best_rarity);
+            if (best->entry_count < 1) {
+              PFATAL("Selected edge_entry with no queue_entry's...");
+            }
+
+            afl->cur_edge = best;
+            best->fuzzed_this_cycle = 1;
+            last_fuzzed_entry = 0;
+            afl->queue_cur = best->entries[last_fuzzed_entry];
+          }
+        }
+
+        bool found_in_queue = false;
+        for (u32 j = 0; j < afl->queued_paths; j++) {
+          if (afl->queue_buf[j] == afl->queue_cur) {
+            afl->current_entry = j;
+            found_in_queue = true;
+            break;
+          }
+        }
+
+        if (!found_in_queue) {
+          PFATAL("Failed to find entry %s in queue\n", afl->queue_cur->fname);
+        }
+
+      } else if (likely(!afl->old_seed_selection)) {
 
         if (unlikely(prev_queued_paths < afl->queued_paths ||
                      afl->reinit_table)) {

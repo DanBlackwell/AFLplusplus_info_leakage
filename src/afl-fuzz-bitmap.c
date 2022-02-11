@@ -720,6 +720,9 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
           }
 
           if (this_edge->entry_count < afl->ncd_entries_per_edge) {
+            if (this_edge->entry_count == 0) {
+              this_edge->discovery_execs = afl->fsrv.total_execs;
+            }
 #ifdef NOISY
             printf("  Inserting candidate w checksum %020llu at pos %d\n",
                    q_entry->exec_cksum, this_edge->entry_count);
@@ -751,10 +754,11 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
 //          bool should_calc_NCD = true;
           bool should_calc_NCD = this_edge->hit_count <= 10 ||
                                  (this_edge->hit_count <= 100 && this_edge->hit_count % 10 == 0) ||
-                                 (this_edge->hit_count <= 1000 && this_edge->hit_count % 100 == 0) ||
-                                 (this_edge->hit_count <= 10000 && this_edge->hit_count % 1000 == 0) ||
-                                 (this_edge->hit_count <= 100000 && this_edge->hit_count % 10000 == 0) ||
-                                 (this_edge->hit_count % 100000 == 0);
+                                 (this_edge->hit_count % 100 == 0);
+//                                 (this_edge->hit_count <= 1000 && this_edge->hit_count % 100 == 0) ||
+//                                 (this_edge->hit_count <= 10000 && this_edge->hit_count % 1000 == 0) ||
+//                                 (this_edge->hit_count <= 100000 && this_edge->hit_count % 10000 == 0) ||
+//                                 (this_edge->hit_count % 100000 == 0);
 
           if (!should_calc_NCD) {
 //            printf("  hit count: %d, not going to check NCD\n", this_edge->hit_count);

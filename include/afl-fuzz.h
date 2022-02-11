@@ -204,6 +204,10 @@ struct queue_entry {
 struct edge_entry {
   u16 edge_num;                     /* The number of this edge in the bitmap */
   u16 edge_frequency;        /* The _ceiled_ number of times the edge is hit */
+  u64 discovery_execs;       /* number of execs before first entry was found */
+  float execs_per_hit;         /* avg global execs per hit (since discovery) */
+  u32 fuzzed_this_cycle;                   /* have we fuzzed it yet?         */
+
 
   u32 hit_count;            /* Number of generated inputs covering this edge */
 
@@ -651,6 +655,7 @@ typedef struct afl_state {
 
   struct edge_entry *edge_entries;     /* list of edge_entry for run        */
   u32 edge_entry_count;                /* number of edge_entries            */
+  struct edge_entry *cur_edge;         /* Currently fuzzed edge             */
 
   struct queue_entry *queue,            /* Fuzzing queue (linked list)      */
       *queue_cur,                       /* Current offset within the queue  */
