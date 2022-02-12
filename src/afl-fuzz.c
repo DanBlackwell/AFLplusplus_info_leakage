@@ -35,6 +35,7 @@
   #include <fcntl.h>
   #include <sys/ipc.h>
   #include <sys/shm.h>
+  #include <assert.h>
 #endif
 
 #ifdef __APPLE__
@@ -2090,6 +2091,8 @@ int main(int argc, char **argv_orig, char **envp) {
   OKF("Writing mutation introspection to '%s'", ifn);
   #endif
 
+  u32 fuzzed_edge_count = 0;
+
   while (likely(!afl->stop_soon)) {
 
     // Used to keep track of whether fuzzer needs resetting
@@ -2114,7 +2117,8 @@ int main(int argc, char **argv_orig, char **envp) {
     printf("Runs in current cycle %u, queue: %u\n", runs_in_current_cycle, afl->queued_paths);
     if (unlikely((!afl->old_seed_selection &&
                   runs_in_current_cycle > afl->queued_paths) ||
-                 (afl->old_seed_selection && !afl->queue_cur))) {
+                 (afl->old_seed_selection && !afl->queue_cur) ||
+                 fuzzed_edge_count == afl->discovered_edges)) {
 
       if (unlikely((afl->last_sync_cycle < afl->queue_cycle ||
                     (!afl->queue_cycle && afl->afl_env.afl_import_first)) &&
@@ -2129,6 +2133,8 @@ int main(int argc, char **argv_orig, char **envp) {
           afl->edge_entries[i].fuzzed_this_cycle = 0;
         }
       }
+
+      fuzzed_edge_count = 0;
 
       ++afl->queue_cycle;
       runs_in_current_cycle = (u32)-1;
@@ -2319,6 +2325,10 @@ int main(int argc, char **argv_orig, char **envp) {
       last_select = afl->fsrv.total_execs;
 
       if (afl->ncd_based_queue) {
+        if (afl->discovered_edges && fuzzed_edge_count == afl->discovered_edges) {
+          break;
+        }
+
         static int last_fuzzed_entry = 0;
         bool exhausted_edge = (afl->cur_edge == NULL);
 
@@ -2369,6 +2379,7 @@ int main(int argc, char **argv_orig, char **envp) {
             best->fuzzed_this_cycle = 1;
             last_fuzzed_entry = 0;
             afl->queue_cur = best->entries[last_fuzzed_entry];
+            fuzzed_edge_count++;
           }
         }
 

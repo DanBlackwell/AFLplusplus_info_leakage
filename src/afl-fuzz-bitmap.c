@@ -721,6 +721,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
 
           if (this_edge->entry_count < afl->ncd_entries_per_edge) {
             if (this_edge->entry_count == 0) {
+              afl->discovered_edges++;
               this_edge->discovery_execs = afl->fsrv.total_execs;
             }
 #ifdef NOISY

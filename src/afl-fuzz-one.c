@@ -431,16 +431,16 @@ u8 fuzz_one_original(afl_state_t *afl) {
        The odds of skipping stuff are higher for already-fuzzed inputs and
        lower for never-fuzzed entries. */
 
-    if (afl->queue_cycle > 1 &&
-        (afl->queue_cur->fuzz_level == 0 || afl->queue_cur->was_fuzzed)) {
-
-    if (likely(rand_below(afl, 100) < SKIP_NFAV_NEW_PROB)) { printf("BAIL 3\n"); return 1; }
-
-    } else {
-
-      if (likely(rand_below(afl, 100) < SKIP_NFAV_OLD_PROB)) {  printf("BAIL 4\n");return 1; }
-
-    }
+//    if (afl->queue_cycle > 1 &&
+//        (afl->queue_cur->fuzz_level == 0 || afl->queue_cur->was_fuzzed)) {
+//
+//    if (likely(rand_below(afl, 100) < SKIP_NFAV_NEW_PROB)) { printf("BAIL 3\n"); return 1; }
+//
+//    } else {
+//
+//      if (likely(rand_below(afl, 100) < SKIP_NFAV_OLD_PROB)) {  printf("BAIL 4\n");return 1; }
+//
+//    }
 
   }
 

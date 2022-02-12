@@ -555,6 +555,8 @@ typedef struct afl_state {
   u32 hashfuzz_reset_period;            /* number of executions between resets */
   u64 hashfuzz_discovered_partitions;   /* bit-fields marking discovered hashfuzz partitions */
 
+  u32 discovered_edges;             /* num edges discovered in flexi queue */
+
   u8 *virgin_bits,                      /* Regions yet untouched by fuzzing */
       *virgin_tmout,                    /* Bits we haven't seen in tmouts   */
       *virgin_crash;                    /* Bits we haven't seen in crashes  */
