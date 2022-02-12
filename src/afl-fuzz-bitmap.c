@@ -724,6 +724,8 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
               afl->discovered_edges++;
               this_edge->discovery_execs = afl->fsrv.total_execs;
             }
+
+            this_edge->completed_fuzzing_this_cycle = false;
 #ifdef NOISY
             printf("  Inserting candidate w checksum %020llu at pos %d\n",
                    q_entry->exec_cksum, this_edge->entry_count);

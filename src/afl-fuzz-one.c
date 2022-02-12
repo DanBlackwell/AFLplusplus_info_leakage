@@ -2030,7 +2030,7 @@ havoc_stage:
   int latest_hit_cnt = afl->queued_paths + afl->unique_crashes;
   int entries = 1;
 
-  bool splitFuzzTime = afl->ncd_based_queue ||
+  bool splitFuzzTime = /*afl->ncd_based_queue || */
                        (afl->hashfuzz_enabled && !afl->hashfuzz_mimic_transformation);
   if (splitFuzzTime) {
     if (afl->ncd_based_queue) {

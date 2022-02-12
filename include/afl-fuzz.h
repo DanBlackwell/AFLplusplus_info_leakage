@@ -170,7 +170,8 @@ struct queue_entry {
       favored,                          /* Currently favored?               */
       fs_redundant,                     /* Marked as redundant in the fs?   */
       is_ascii,                         /* Is the input just ascii text?    */
-      disabled;                         /* Is disabled from fuzz selection  */
+      disabled,                         /* Is disabled from fuzz selection  */
+      fuzzed_this_cycle;                /* Have we fuzzed this cycle?       */
 
   u32 bitmap_size,                      /* Number of bits set in bitmap     */
       fuzz_level,                       /* Number of fuzzing iterations     */
@@ -206,7 +207,8 @@ struct edge_entry {
   u16 edge_frequency;        /* The _ceiled_ number of times the edge is hit */
   u64 discovery_execs;       /* number of execs before first entry was found */
   float execs_per_hit;         /* avg global execs per hit (since discovery) */
-  u32 fuzzed_this_cycle;                   /* have we fuzzed it yet?         */
+  u8 fuzzed_inputs_this_cycle;            /* have we fuzzed all entries yet? */
+  u32 completed_fuzzing_this_cycle;       /* have we fuzzed all entries yet? */
 
 
   u32 hit_count;            /* Number of generated inputs covering this edge */
