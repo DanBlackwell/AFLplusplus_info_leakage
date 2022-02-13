@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include "hashfuzz.h"
 #include "hashmap.h"
+#include "afl-fuzz-ncd-queue.h"
 #ifndef USEMMAP
   #include <sys/mman.h>
   #include <sys/stat.h>
@@ -2322,11 +2323,6 @@ int main(int argc, char **argv_orig, char **envp) {
 
     do {
 
-      static u64 last_select = 0;
-      u64 execs_since_last = afl->fsrv.total_execs - last_select;
-//      printf("Selecting new fuzzing entry: %llu execs\n", execs_since_last);
-      last_select = afl->fsrv.total_execs;
-
       if (afl->ncd_based_queue) {
         if (cycle_completed) {
           if (!afl->discovered_edges) {
@@ -2336,96 +2332,15 @@ int main(int argc, char **argv_orig, char **envp) {
           }
         }
 
-        struct edge_entry *best = NULL;
-        u32 best_pos = UINT32_MAX;
-        double best_rarity = 0.0;
-        u8 least_fuzzed_entries = 255;
-
-        for (u32 i = 0; i < afl->edge_entry_count; i++) {
-          struct edge_entry *entry = &afl->edge_entries[i];
-          if (!entry->completed_fuzzing_this_cycle &&
-              entry->discovery_execs &&
-              entry->fuzzed_inputs_this_cycle <= least_fuzzed_entries) {
-
-            bool beats_least_fuzzed = entry->fuzzed_inputs_this_cycle < least_fuzzed_entries;
-
-            if (beats_least_fuzzed) {
-              least_fuzzed_entries = entry->fuzzed_inputs_this_cycle;
-            }
-
-            if (execs_since_last) {
-              u64 execs_since = afl->fsrv.total_execs - entry->discovery_execs;
-              entry->execs_per_hit = (float)execs_since / (float)entry->hit_count;
-            }
-
-            if (beats_least_fuzzed || entry->execs_per_hit > best_rarity) {
-              best_rarity = entry->execs_per_hit;
-              best = entry;
-              best_pos = i;
-            }
-          }
+        bool found_favored = false;
+        if (afl->pending_favored) {
+          found_favored = select_favored_queue_entry(afl);
         }
 
-        if (!best) {
-          if (afl->queued_discovered == 0) {
-            afl->current_entry = 0;
-            afl->queue_cur = afl->queue_buf[afl->current_entry];
-            afl->queue_cur->fuzzed_this_cycle = true;
-          } else {
-
-            for (u32 i = 0; i < afl->queued_paths; i++) {
-              if (!afl->queue_buf[i]->fuzzed_this_cycle) {
-                PFATAL("Queue entry %u was not fuzzed this cycle\n", i);
-              }
-            }
-
-            printf("Marking completed\n");
-            cycle_completed = true;
-            break;
-          }
-        } else {
-          if (best->entry_count < 1) {
-            PFATAL("Selected edge_entry with no queue_entry's...");
-          }
-
-          afl->cur_edge = best;
-
-          u8 unfuzzed_entries = 0;
-          for (int i = 0; i < best->entry_count; i++) {
-            if (!best->entries[i]->fuzzed_this_cycle)
-              unfuzzed_entries++;
-          }
-
-          if (!unfuzzed_entries) { FATAL("Picked edge with no unfuzzed entries WTF\n"); }
-
-          u32 next = rand_below(afl, unfuzzed_entries);
-          for (int i = 0; i < best->entry_count; i++) {
-            if (!best->entries[i]->fuzzed_this_cycle) {
-              if (!next) {
-                afl->queue_cur = best->entries[i];
-                best->entries[i]->fuzzed_this_cycle = true;
-                best->fuzzed_inputs_this_cycle++;
-                // If this was the last unfuzzed_entry then mark completed
-                best->completed_fuzzing_this_cycle = (unfuzzed_entries == 1);
-//                printf("Selected edge %u with rarity: %f, entry: %d for fuzzing\n", best_pos, best_rarity, i);
-                break;
-              }
-              next--;
-            }
-          }
-        }
-
-        bool found_in_queue = false;
-        for (u32 j = 0; j < afl->queued_paths; j++) {
-          if (afl->queue_buf[j] == afl->queue_cur) {
-            afl->current_entry = j;
-            found_in_queue = true;
-            break;
-          }
-        }
-
-        if (!found_in_queue) {
-          PFATAL("Failed to find entry %s in queue\n", afl->queue_cur->fname);
+        if (!found_favored) {
+          // select next entry returns true if queue exhausted
+          cycle_completed = select_non_favored_queue_entry(afl);
+          if (cycle_completed) { break; }
         }
 
       } else if (likely(!afl->old_seed_selection)) {

@@ -415,13 +415,13 @@ u8 fuzz_one_original(afl_state_t *afl) {
        possibly skip to them at the expense of already-fuzzed or non-favored
        cases. */
 
-//    if (((afl->queue_cur->was_fuzzed > 0 || afl->queue_cur->fuzz_level > 0) ||
-//         !afl->queue_cur->favored) &&
-//        likely(rand_below(afl, 100) < SKIP_TO_NEW_PROB)) {
-//
-//      return 1;
-//
-//    }
+    if (((afl->queue_cur->was_fuzzed > 0 || afl->queue_cur->fuzz_level > 0) ||
+         !afl->queue_cur->favored) &&
+        likely(rand_below(afl, 100) < SKIP_TO_NEW_PROB)) {
+
+      return 1;
+
+    }
 
   } else if (!afl->non_instrumented_mode && !afl->queue_cur->favored &&
 
@@ -431,16 +431,22 @@ u8 fuzz_one_original(afl_state_t *afl) {
        The odds of skipping stuff are higher for already-fuzzed inputs and
        lower for never-fuzzed entries. */
 
-//    if (afl->queue_cycle > 1 &&
-//        (afl->queue_cur->fuzz_level == 0 || afl->queue_cur->was_fuzzed)) {
-//
-//    if (likely(rand_below(afl, 100) < SKIP_NFAV_NEW_PROB)) { printf("BAIL 3\n"); return 1; }
-//
-//    } else {
-//
-//      if (likely(rand_below(afl, 100) < SKIP_NFAV_OLD_PROB)) {  printf("BAIL 4\n");return 1; }
-//
-//    }
+    if (afl->ncd_based_queue) {
+      if (rand_below(afl, 100) < 100 - 100 / afl->ncd_entries_per_edge) {
+        return 1;
+      }
+    } else {
+      if (afl->queue_cycle > 1 &&
+          (afl->queue_cur->fuzz_level == 0 || afl->queue_cur->was_fuzzed)) {
+        if (likely(rand_below(afl, 100) < SKIP_NFAV_NEW_PROB)) {
+          return 1;
+        }
+      } else {
+        if (likely(rand_below(afl, 100) < SKIP_NFAV_OLD_PROB)) {
+          return 1;
+        }
+      }
+    }
 
   }
 
