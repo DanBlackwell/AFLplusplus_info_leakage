@@ -618,7 +618,8 @@ void swap_in_candidate(afl_state_t *afl, struct queue_entry *evictee, struct que
   close(fd);
 
   char *pathEnd = strrchr(evictee->fname, '/');
-  char *newFilename = malloc(NAME_MAX + (pathEnd - (char *)evictee->fname));
+  size_t maxLen = NAME_MAX + (pathEnd - (char *)evictee->fname);
+  char *newFilename = malloc(maxLen);
   long newFilenameLen = 0;
   char *opPos = strstr(evictee->fname, ",op:");
   if (!opPos) {
@@ -634,11 +635,11 @@ void swap_in_candidate(afl_state_t *afl, struct queue_entry *evictee, struct que
   memcpy(newFilename, evictee->fname, newFilenameLen);
 
   newFilenameLen += snprintf(newFilename + newFilenameLen,
-                             NAME_MAX - newFilenameLen,
+                             maxLen - newFilenameLen,
                              ",updated:%llu",
                              get_cur_time() + afl->prev_run_time - afl->start_time);
   snprintf(newFilename + newFilenameLen,
-           NAME_MAX - newFilenameLen,
+           maxLen - newFilenameLen,
            "%s", opPos);
 
   int ret = rename(evictee->fname, newFilename);
