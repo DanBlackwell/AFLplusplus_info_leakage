@@ -432,7 +432,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
        lower for never-fuzzed entries. */
 
     if (afl->ncd_based_queue) {
-      if (rand_below(afl, 100) < 100 - 100 / afl->ncd_entries_per_edge) {
+      if (rand_below(afl, 100) < (u32)(105 - 100 / afl->ncd_entries_per_edge)) {
         return 1;
       }
     } else {

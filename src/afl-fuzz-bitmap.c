@@ -617,7 +617,8 @@ void swap_in_candidate(afl_state_t *afl, struct queue_entry *evictee, struct que
   ck_write(fd, evictee->testcase_buf, evictee->len, evictee->fname);
   close(fd);
 
-  char *newFilename = malloc(NAME_MAX);
+  char *pathEnd = strrchr(evictee->fname, '/');
+  char *newFilename = malloc(NAME_MAX + (pathEnd - (char *)evictee->fname));
   long newFilenameLen = 0;
   char *opPos = strstr(evictee->fname, ",op:");
   if (!opPos) {
@@ -1109,8 +1110,6 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     u8 interesting = 0;
     u8 hashfuzzClass = 0;
     s32 compressedLen = -1;
-    struct queue_entry *evicted = NULL;
-    struct path_partitions *pathPartitions = NULL;
 
     /* Keep only if there are new bits in the map, add to queue for
        future fuzzing, etc. */
