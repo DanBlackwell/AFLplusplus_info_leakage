@@ -2,7 +2,8 @@
 // Created by dan on 13/02/2022.
 //
 
-#include "afl-fuzz-ncd-queue.h"
+#include <stdbool.h>
+#include "../include/afl-fuzz-ncd-queue.h"
 
 /* returns bool set to true if the queue is exhausted for this cycle */
 bool select_non_favored_queue_entry(afl_state_t *afl) {
@@ -46,7 +47,7 @@ bool select_non_favored_queue_entry(afl_state_t *afl) {
     } else {
       for (u32 i = 0; i < afl->queued_paths; i++) {
         if (!afl->queue_buf[i]->fuzzed_this_cycle) {
-          PFATAL("Queue entry %u was not fuzzed this cycle\n", i);
+          printf("Queue entry %u was not fuzzed this cycle\n", i);
         }
       }
 
@@ -103,6 +104,8 @@ bool select_non_favored_queue_entry(afl_state_t *afl) {
 }
 
 bool select_favored_queue_entry(afl_state_t *afl) {
+  u32 to_fetch = rand_below(afl, afl->pending_favored);
+
   for (u32 edgeNum = 0; edgeNum < afl->edge_entry_count; edgeNum++) {
     struct edge_entry *edge = &afl->edge_entries[edgeNum];
 
@@ -110,28 +113,33 @@ bool select_favored_queue_entry(afl_state_t *afl) {
       struct queue_entry *entry = edge->entries[entryNum];
 
       if (entry->favored && !entry->fuzzed_this_cycle) {
-        afl->queue_cur = entry;
-        entry->fuzzed_this_cycle = true;
+        if (to_fetch == 0) {
+          afl->queue_cur = entry;
+          entry->fuzzed_this_cycle = true;
 
-        edge->fuzzed_inputs_this_cycle++;
-        if (edge->fuzzed_inputs_this_cycle == edge->entry_count) {
-          edge->completed_fuzzing_this_cycle = true;
-        }
-
-        bool found = false;
-        for (u32 i = 0; i < afl->queued_paths; i++) {
-          if (afl->queue_buf[i] == entry) {
-            afl->current_entry = i;
-            found = true;
-            break;
+          edge->fuzzed_inputs_this_cycle++;
+          if (edge->fuzzed_inputs_this_cycle == edge->entry_count) {
+            edge->completed_fuzzing_this_cycle = true;
           }
+
+          bool found = false;
+          for (u32 i = 0; i < afl->queued_paths; i++) {
+            if (afl->queue_buf[i] == entry) {
+              afl->current_entry = i;
+              found = true;
+              break;
+            }
+          }
+
+          if (!found) { FATAL("Failed to find favored entry in queue"); }
+
+          printf("Fuzzing favored entry: %u belonging to edge %u\n",
+                 afl->current_entry, edgeNum);
+
+          return true;
         }
 
-        if (!found) { FATAL("Failed to find favored entry in queue"); }
-
-        printf("Fuzzing favored entry: %u belonging to edge %u\n", afl->current_entry, edgeNum);
-
-        return true;
+        to_fetch--;
       }
     }
   }

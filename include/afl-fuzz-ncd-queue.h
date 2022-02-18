@@ -6,6 +6,7 @@
 #define AFLPLUSPLUS_AFL_FUZZ_NCD_QUEUE_H
 
 #include "afl-fuzz.h"
+#include "types.h"
 
 bool select_non_favored_queue_entry(afl_state_t *afl);
 bool select_favored_queue_entry(afl_state_t *afl);
