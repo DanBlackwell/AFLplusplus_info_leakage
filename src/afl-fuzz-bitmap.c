@@ -674,6 +674,8 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
   I HAVE NOT IMPLEMENTED 32 BIT sorry
 #endif
 
+  u8 inserted = false;
+
   int edgeNum = 0;
   while (i--) {
     if (*current) {
@@ -753,6 +755,8 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
             this_edge->entry_count++;
 
             this_edge->normalised_compression_dist = calc_NCDm(afl, this_edge->entries, this_edge->entry_count);
+            inserted = true;
+            update_bitmap_score(afl, new);
             continue;
           }
 
@@ -788,6 +792,8 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
 
             this_edge->replacement_count++;
             this_edge->normalised_compression_dist = calc_NCDm(afl, this_edge->entries, this_edge->entry_count);
+            update_bitmap_score(afl, evictee);
+            inserted = true;
           }
         }
       }
@@ -797,7 +803,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
     edgeNum += 4;
   }
 
-  return 0;
+  return inserted;
 }
 
 /* Check if the current execution path brings anything new to the table.
@@ -1150,7 +1156,6 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
       };
 
       save_to_edge_entries(afl, &new, new_bits);
-
     }
 
     if (afl->hashfuzz_enabled) {
