@@ -48,7 +48,7 @@ inline u32 select_next_queue_entry(afl_state_t *afl) {
 
 double compute_weight(afl_state_t *afl, struct queue_entry *q,
                       double avg_exec_us, double avg_bitmap_size,
-                      double avg_top_size) {
+                      double avg_top_size, double avg_rarity) {
 
   double weight = 1.0;
 
@@ -57,6 +57,10 @@ double compute_weight(afl_state_t *afl, struct queue_entry *q,
     u32 hits = afl->n_fuzz[q->n_fuzz_entry];
     if (likely(hits)) { weight *= log10(hits) + 1; }
 
+  }
+
+  if (afl->ncd_based_queue) {
+    weight *= q->rarity / avg_rarity;
   }
 
   if (likely(afl->schedule < RARE)) { weight *= (avg_exec_us / q->exec_us); }
@@ -98,20 +102,43 @@ void create_alias_table(afl_state_t *afl) {
     double avg_exec_us = 0.0;
     double avg_bitmap_size = 0.0;
     double avg_top_size = 0.0;
+    double avg_rarity = 0.0;
     u32    active = 0;
 
-    for (i = 0; i < n; i++) {
+    if (afl->ncd_based_queue) {
 
-      struct queue_entry *q = afl->queue_buf[i];
+      for (i = 0; i < afl->edge_entry_count; i++) {
+        struct edge_entry *edge = &afl->edge_entries[i];
+        if (!edge->entry_count) continue;
 
-      // disabled entries might have timings and bitmap values
-      if (likely(!q->disabled)) {
+        u64 execs_since = afl->fsrv.total_execs - edge->discovery_execs;
+        double edge_rarity = edge->entry_count * ((double)execs_since / edge->hit_count);
+        avg_rarity += edge_rarity;
 
-        avg_exec_us += q->exec_us;
-        avg_bitmap_size += log(q->bitmap_size);
-        avg_top_size += q->tc_ref;
-        ++active;
+        for (u32 j = 0; j < edge->entry_count; j++) {
+          struct queue_entry *q = edge->entries[j];
+          if (likely(!q->disabled)) {
+            q->rarity = edge_rarity;
+            avg_exec_us += q->exec_us;
+            avg_bitmap_size += log(q->bitmap_size);
+            avg_top_size += q->tc_ref;
+            ++active;
+          }
+        }
+      }
 
+    } else {
+
+      for (i = 0; i < n; i++) {
+        struct queue_entry *q = afl->queue_buf[i];
+
+        // disabled entries might have timings and bitmap values
+        if (likely(!q->disabled)) {
+          avg_exec_us += q->exec_us;
+          avg_bitmap_size += log(q->bitmap_size);
+          avg_top_size += q->tc_ref;
+          ++active;
+        }
       }
 
     }
@@ -119,6 +146,9 @@ void create_alias_table(afl_state_t *afl) {
     avg_exec_us /= active;
     avg_bitmap_size /= active;
     avg_top_size /= active;
+    if (afl->ncd_based_queue) {
+      avg_rarity /= active;
+    }
 
     for (i = 0; i < n; i++) {
 
@@ -127,7 +157,8 @@ void create_alias_table(afl_state_t *afl) {
       if (likely(!q->disabled)) {
 
         q->weight =
-            compute_weight(afl, q, avg_exec_us, avg_bitmap_size, avg_top_size);
+            compute_weight(afl, q, avg_exec_us, avg_bitmap_size, avg_top_size,
+                           avg_rarity);
         q->perf_score = calculate_score(afl, q);
         sum += q->weight;
 

@@ -617,7 +617,9 @@ void swap_in_candidate(afl_state_t *afl, struct queue_entry *evictee, struct que
   ck_write(fd, evictee->testcase_buf, evictee->len, evictee->fname);
   close(fd);
 
-  char *newFilename = malloc(NAME_MAX);
+  char *pathEnd = strrchr(evictee->fname, '/');
+  size_t maxLen = NAME_MAX + (pathEnd - (char *)evictee->fname);
+  char *newFilename = malloc(maxLen);
   long newFilenameLen = 0;
   char *opPos = strstr(evictee->fname, ",op:");
   if (!opPos) {
@@ -633,11 +635,11 @@ void swap_in_candidate(afl_state_t *afl, struct queue_entry *evictee, struct que
   memcpy(newFilename, evictee->fname, newFilenameLen);
 
   newFilenameLen += snprintf(newFilename + newFilenameLen,
-                             NAME_MAX - newFilenameLen,
+                             maxLen - newFilenameLen,
                              ",updated:%llu",
                              get_cur_time() + afl->prev_run_time - afl->start_time);
   snprintf(newFilename + newFilenameLen,
-           NAME_MAX - newFilenameLen,
+           maxLen - newFilenameLen,
            "%s", opPos);
 
   int ret = rename(evictee->fname, newFilename);
@@ -720,6 +722,9 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
           }
 
           if (this_edge->entry_count < afl->ncd_entries_per_edge) {
+            if (this_edge->entry_count == 0) {
+              this_edge->discovery_execs = afl->fsrv.total_execs;
+            }
 #ifdef NOISY
             printf("  Inserting candidate w checksum %020llu at pos %d\n",
                    q_entry->exec_cksum, this_edge->entry_count);

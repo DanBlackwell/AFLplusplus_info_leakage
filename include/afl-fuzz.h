@@ -190,7 +190,8 @@ struct queue_entry {
 #endif
 
   double perf_score,                    /* performance score                */
-      weight;
+      weight,
+      rarity;                           /* relative rarity, from edge_entry */
 
   u8 *testcase_buf;                     /* The testcase buffer, if loaded.  */
 
@@ -204,8 +205,8 @@ struct queue_entry {
 struct edge_entry {
   u16 edge_num;                     /* The number of this edge in the bitmap */
   u16 edge_frequency;        /* The _ceiled_ number of times the edge is hit */
-
   u32 hit_count;            /* Number of generated inputs covering this edge */
+  u64 discovery_execs;       /* number of execs before first entry was found */
 
   u8 entry_count;         /* Number of stored entries we have for this input */
   struct queue_entry *entries[8];      /* Stored queue_entries for this edge */
