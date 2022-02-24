@@ -570,30 +570,8 @@ u8 is_interesting(afl_state_t *afl) {
           struct edge_entry *this_edge = &afl->edge_entries[edge_entries_pos];
 
           this_edge->hit_count++;
-//          if (this_edge->hit_count <= 10) {
-//            printf("Would add this entry for edge_num %hu, edge_frequency %hu, as hit count is %d\n",
-//                   this_edge->edge_num, this_edge->edge_frequency, this_edge->hit_count);
-//            return 1;
-//          }
-
-//          printf("At edgeNum: %d, rep count: %d, got edge entry: { edge_num: %hu, edge_reps: %hu }\n",
-//              edgeNum + i, restored[i], this_edge->edge_num, this_edge->edge_frequency);
-
         }
       }
-
-//      printf("  ");
-//      for (int i = 0; i < 4; i++) {
-//        printf("[%03d]: %04X, ", edgeNum + i, mem16[i]);
-//      }
-//      printf("\n");
-//
-//    } else {
-//      printf("  ");
-//      for (int i = 0; i < 4; i++) {
-//        printf("[%03d]: %04X, ", edgeNum + i, 0);
-//      }
-//      printf("\n");
     }
 
     current++;
@@ -607,11 +585,13 @@ u8 is_interesting(afl_state_t *afl) {
 
 void move_queue_entry_to_correct_input_hash(afl_state_t *afl, struct queue_entry *evictee, struct queue_entry *new) {
   // First let's remove the evictee from it's current hash
+  printf("evictee->testcase_buf: %p\n", evictee->testcase_buf);
+  fflush(stdout);
   u64 hash = hash64(evictee->testcase_buf, evictee->len, HASH_CONST);
   if (hash != evictee->input_hash) {
     FATAL("hash %020llu != evictee->input_hash %020llu", hash, evictee->input_hash);
   }
-  struct queue_input_hash input_hash = { .hash = hash };
+  struct queue_input_hash input_hash = { .hash = evictee->input_hash };
   struct queue_input_hash *found = hashmap_get(afl->queue_input_hashmap, &input_hash);
   if (!found) {
     FATAL("Failed to find queue_input_hash for %020llu\n", hash);
@@ -621,25 +601,28 @@ void move_queue_entry_to_correct_input_hash(afl_state_t *afl, struct queue_entry
   for (u32 i = 0; i < found->inputs_count; i++) {
     struct queue_entry *entry = found->inputs[i];
     if (entry == evictee) { removed = true; }
-    if (removed && i != found->inputs_count - 1) {
+    if (removed && i < found->inputs_count - 1) {
       found->inputs[i] = found->inputs[i + 1];
     }
   }
 
   if (!removed) {
-    FATAL("Failed to find this queue_entry in list of found->inputs %020llu\n", hash);
+    FATAL("Failed to find this queue_entry (%p) in list of found->inputs %020llu\n", evictee, hash);
   }
   found->inputs_count--;
 
-  // Then let's insert this evictee into its' new hash
+  // Then let's insert this evictee into its new hash
   hash = hash64(new->testcase_buf, new->len, HASH_CONST);
   input_hash.hash = hash;
   found = hashmap_get(afl->queue_input_hashmap, &input_hash);
+  printf("Moving evictee (%p) from hash %020llu to %020llu\n", evictee, evictee->input_hash, hash);
   if (!found) {
     input_hash.allocated_inputs = 8;
     input_hash.inputs = ck_alloc(sizeof(input_hash.inputs) * input_hash.allocated_inputs);
     input_hash.inputs[0] = evictee;
     input_hash.inputs_count = 1;
+    hashmap_set(afl->queue_input_hashmap, &input_hash);
+    printf("[EVICTION] Created input_hash for %020llu\n", input_hash.hash);
   } else {
     if (found->allocated_inputs == found->inputs_count) {
       found->allocated_inputs *= 2;
@@ -865,7 +848,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
             }
 
             if (found->inputs_count > 1) {
-              evictionCandidate = i;
+              evictionCandidate = (int)i;
               break;
             }
           }
