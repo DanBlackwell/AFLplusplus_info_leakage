@@ -605,7 +605,54 @@ u8 is_interesting(afl_state_t *afl) {
   return 0;
 }
 
+void move_queue_entry_to_correct_input_hash(afl_state_t *afl, struct queue_entry *evictee, struct queue_entry *new) {
+  // First let's remove the evictee from it's current hash
+  u64 hash = hash64(evictee->testcase_buf, evictee->len, HASH_CONST);
+  if (hash != evictee->input_hash) {
+    FATAL("hash %020llu != evictee->input_hash %020llu", hash, evictee->input_hash);
+  }
+  struct queue_input_hash input_hash = { .hash = hash };
+  struct queue_input_hash *found = hashmap_get(afl->queue_input_hashmap, &input_hash);
+  if (!found) {
+    FATAL("Failed to find queue_input_hash for %020llu\n", hash);
+  }
+
+  bool removed = false;
+  for (u32 i = 0; i < found->inputs_count; i++) {
+    struct queue_entry *entry = found->inputs[i];
+    if (entry == evictee) { removed = true; }
+    if (removed && i != found->inputs_count - 1) {
+      found->inputs[i] = found->inputs[i + 1];
+    }
+  }
+
+  if (!removed) {
+    FATAL("Failed to find this queue_entry in list of found->inputs %020llu\n", hash);
+  }
+  found->inputs_count--;
+
+  // Then let's insert this evictee into its' new hash
+  hash = hash64(new->testcase_buf, new->len, HASH_CONST);
+  input_hash.hash = hash;
+  found = hashmap_get(afl->queue_input_hashmap, &input_hash);
+  if (!found) {
+    input_hash.allocated_inputs = 8;
+    input_hash.inputs = ck_alloc(sizeof(input_hash.inputs) * input_hash.allocated_inputs);
+    input_hash.inputs[0] = evictee;
+    input_hash.inputs_count = 1;
+  } else {
+    if (found->allocated_inputs == found->inputs_count) {
+      found->allocated_inputs *= 2;
+      found->inputs = ck_realloc(found->inputs, sizeof(found->inputs) * found->allocated_inputs);
+    }
+    found->inputs[found->inputs_count] = evictee;
+    found->inputs_count++;
+  }
+}
+
 void swap_in_candidate(afl_state_t *afl, struct queue_entry *evictee, struct queue_entry *new) {
+  move_queue_entry_to_correct_input_hash(afl, evictee, new);
+
   free(evictee->testcase_buf);
   evictee->len = new->len;
   evictee->testcase_buf = malloc(new->len);
@@ -724,8 +771,20 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
           }
 
           if (this_edge->entry_count < afl->ncd_entries_per_edge) {
+            struct queue_input_hash *found = NULL;
+            struct queue_input_hash input_hash = {};
+
             if (this_edge->entry_count == 0) {
               this_edge->discovery_execs = afl->fsrv.total_execs;
+            }
+
+            u64 hash = hash64(q_entry->testcase_buf, q_entry->len, HASH_CONST);
+            input_hash.hash = hash;
+            found = hashmap_get(afl->queue_input_hashmap, &input_hash);
+            if (this_edge->entry_count > 0 && found) {
+              printf("Not adding input for edge %d as it already exists elsewhere (and this would be the %dth entry)\n",
+                     this_edge->edge_num, this_edge->entry_count + 1);
+              continue;
             }
 #ifdef NOISY
             printf("  Inserting candidate w checksum %020llu at pos %d\n",
@@ -747,6 +806,31 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
             struct queue_entry *new = afl->queue_top;
             new->testcase_buf = malloc(new->len);
             memcpy(new->testcase_buf, q_entry->testcase_buf, new->len);
+            new->input_hash = hash64(new->testcase_buf, new->len, HASH_CONST);
+
+            if (found) {
+              if (found->inputs_count == found->allocated_inputs) {
+                found->allocated_inputs *= 2;
+                found->inputs = ck_realloc(
+                    found->inputs,
+                    found->allocated_inputs * sizeof(found->inputs)
+                );
+                printf("Realloced found->inputs to %d for hash %020llu\n",
+                       found->allocated_inputs, found->hash);
+              }
+
+              found->inputs[found->inputs_count] = new;
+              found->inputs_count++;
+            } else {
+              input_hash.hash = new->input_hash;
+              input_hash.allocated_inputs = 8;
+              input_hash.inputs = ck_alloc(input_hash.allocated_inputs *
+                                           sizeof(input_hash.inputs));
+              input_hash.inputs[0] = new;
+              input_hash.inputs_count = 1;
+              hashmap_set(afl->queue_input_hashmap, &input_hash);
+              printf("Created input_hash for %020llu\n", input_hash.hash);
+            }
 
             this_edge->entries[this_edge->entry_count] = new;
             this_edge->entry_count++;
@@ -757,40 +841,70 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
             continue;
           }
 
-//          bool should_calc_NCD = true;
-          bool should_calc_NCD = this_edge->hit_count <= 10 ||
-                                 (this_edge->hit_count <= 100 && this_edge->hit_count % 10 == 0) ||
-                                 (this_edge->hit_count <= 1000 && this_edge->hit_count % 100 == 0) ||
-                                 (this_edge->hit_count <= 10000 && this_edge->hit_count % 1000 == 0) ||
-                                 (this_edge->hit_count <= 100000 && this_edge->hit_count % 10000 == 0) ||
-                                 (this_edge->hit_count % 100000 == 0);
+          struct queue_input_hash *found = NULL;
+          struct queue_input_hash input_hash = {};
 
-          if (!should_calc_NCD) {
-//            printf("  hit count: %d, not going to check NCD\n", this_edge->hit_count);
-          } else {
-            int evictionCandidate = find_eviction_candidate(afl,
-                                                            this_edge->normalised_compression_dist,
-                                                            this_edge->entries,
-                                                            this_edge->entry_count,
-                                                            q_entry);
+          u64 hash = hash64(q_entry->testcase_buf, q_entry->len, HASH_CONST);
+          input_hash.hash = hash;
+          found = hashmap_get(afl->queue_input_hashmap, &input_hash);
 
-            if (evictionCandidate == -1) {
-              continue;
+          if (found) {
+            // This queue_entry already exists for another edge
+            continue;
+          }
+
+          int evictionCandidate = -1;
+
+          // let's see if any entries are duplicates and mark for eviction:
+          for (u32 i = 0; i < this_edge->entry_count; i++) {
+            struct queue_entry *entry = this_edge->entries[i];
+            input_hash.hash = entry->input_hash;
+            found = hashmap_get(afl->queue_input_hashmap, &input_hash);
+            if (!found) {
+              FATAL("Failed to find input_hash for %020llu for edge %d\n", input_hash.hash, this_edge->edge_num);
             }
 
-            // We have a real candidate to evict...
-            struct queue_entry *evictee = this_edge->entries[evictionCandidate];
+            if (found->inputs_count > 1) {
+              evictionCandidate = i;
+              break;
+            }
+          }
+
+          // We haven't found any duplicates to kick out, let's see if NCD wins
+          if (evictionCandidate == -1) {
+            bool should_calc_NCD =
+                this_edge->hit_count <= 10 ||
+                (this_edge->hit_count <= 100 && this_edge->hit_count % 10 == 0) ||
+                (this_edge->hit_count <= 1000 && this_edge->hit_count % 100 == 0);
+
+            if (!should_calc_NCD) {
+              //            printf("  hit count: %d, not going to check NCD\n", this_edge->hit_count);
+            } else {
+              evictionCandidate = find_eviction_candidate(
+                  afl,
+                  this_edge->normalised_compression_dist,
+                  this_edge->entries,
+                  this_edge->entry_count,
+                  q_entry
+              );
+
+              if (evictionCandidate == -1) { continue; }
+            }
+          }
+
+          // We have a real candidate to evict...
+          struct queue_entry *evictee = this_edge->entries[evictionCandidate];
 #ifdef NOISY
-            printf("  Will evict candidate at pos %d, w checksum %020llu in favour of current w checksum %020llu\n",
+          printf("  Will evict candidate at pos %d, w checksum %020llu in favour of current w checksum %020llu\n",
                    evictionCandidate, evictee->exec_cksum, q_entry->exec_cksum);
 #endif
-            swap_in_candidate(afl, evictee, q_entry);
+          swap_in_candidate(afl, evictee, q_entry);
+          evictee->input_hash = hash64(evictee->testcase_buf, evictee->len, HASH_CONST);
 
-            this_edge->replacement_count++;
-            this_edge->normalised_compression_dist = calc_NCDm(afl, this_edge->entries, this_edge->entry_count);
-            update_bitmap_score(afl, evictee);
-            inserted = true;
-          }
+          this_edge->replacement_count++;
+          this_edge->normalised_compression_dist = calc_NCDm(afl, this_edge->entries, this_edge->entry_count);
+          update_bitmap_score(afl, evictee);
+          inserted = true;
         }
       }
     }

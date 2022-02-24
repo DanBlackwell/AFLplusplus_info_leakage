@@ -45,6 +45,16 @@
 extern u64 time_spent_working;
 #endif
 
+int queue_input_hash_compare(const void *a, const void *b, void *udata) {
+  const struct queue_input_hash *qa = a;
+  const struct queue_input_hash *qb = b;
+  return qa->hash < qb->hash;
+}
+
+uint64_t queue_input_hash_func(const void *item, uint64_t seed0, uint64_t seed1) {
+  return ((struct queue_input_hash *)item)->hash;
+}
+
 static void at_exit() {
 
   s32   i, pid1 = 0, pid2 = 0;
@@ -1339,7 +1349,7 @@ int main(int argc, char **argv_orig, char **envp) {
 
   }
 
-  if (afl->hashfuzz_enabled || afl->ncd_based_queue) {
+  if (afl->hashfuzz_enabled) {
     hashfuzzFoundPartitions = hashmap_new_with_allocator(ck_alloc, ck_realloc, ck_free,
         sizeof(struct path_partitions), 0, 0, 0,
         path_partitions_hash, path_partitions_compare,
@@ -1348,17 +1358,23 @@ int main(int argc, char **argv_orig, char **envp) {
 
   if (afl->ncd_based_queue) {
 #ifdef WORD_SIZE_64
-      printf("Initing edge_entry_count to %d, allocating: %lu bytes\n", map_size, map_size * sizeof(struct edge_entry));
-      fflush(stdout);
-      afl->edge_entry_count = map_size;
-      afl->edge_entries = ck_alloc(afl->edge_entry_count * sizeof(struct edge_entry));
-      for (size_t i = 0; i < map_size; i++) {
-          afl->edge_entries[i].edge_num = i / 16;
-          afl->edge_entries[i].edge_frequency = 1 << (i % 16);
-      }
+    printf("Initing edge_entry_count to %d, allocating: %lu bytes\n", map_size, map_size * sizeof(struct edge_entry));
+    fflush(stdout);
+    afl->edge_entry_count = map_size;
+    afl->edge_entries = ck_alloc(afl->edge_entry_count * sizeof(struct edge_entry));
+    for (size_t i = 0; i < map_size; i++) {
+      afl->edge_entries[i].edge_num = i / 16;
+      afl->edge_entries[i].edge_frequency = 1 << (i % 16);
+    }
 #else
-      I HAVE NOT IMPLEMENTED 32 BIT sorry
-  #endif
+    I HAVE NOT IMPLEMENTED 32 BIT sorry
+#endif
+
+    afl->queue_input_hashmap = hashmap_new_with_allocator(
+        ck_alloc, ck_realloc, ck_free,
+        sizeof(struct queue_input_hash), 0, 0, 0,
+        queue_input_hash_func, queue_input_hash_compare,NULL, NULL
+    );
   }
 
   ACTF("Getting to work...");

@@ -896,6 +896,10 @@ void perform_dry_run(afl_state_t *afl) {
       q->hashfuzzClass = hashfuzzClassify(use_mem, read_len, afl->hashfuzz_partitions);
     }
 
+    if (afl->ncd_based_queue) {
+      q->input_hash = hash64(use_mem, read_len, HASH_CONST);
+    }
+
     res = calibrate_case(afl, q, use_mem, 0, 1);
 
     if (afl->stop_soon) { return; }
@@ -1159,10 +1163,12 @@ void perform_dry_run(afl_state_t *afl) {
     if (afl->hashfuzz_enabled) {
       check_if_new_partition(q->exec_cksum, q->hashfuzzClass);
     } else if (afl->ncd_based_queue) {
-      struct path_partitions new = {.checksum = q->exec_cksum,
-                                    .foundPartitionsCount = 1};
-      new.queue_entries[0] = q;
-      hashmap_set(hashfuzzFoundPartitions, &new);
+      struct queue_input_hash new = { .hash = q->input_hash };
+      new.allocated_inputs = 8;
+      new.inputs = ck_alloc(sizeof(new.inputs) * new.allocated_inputs);
+      new.inputs[0] = q;
+      new.inputs_count = 1;
+      hashmap_set(afl->queue_input_hashmap, &new);
     }
 
     u32 done = 0;

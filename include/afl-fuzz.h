@@ -46,6 +46,7 @@
 #include "forkserver.h"
 #include "common.h"
 #include "hash.h"
+#include "hashmap.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -180,7 +181,8 @@ struct queue_entry {
   u64 exec_us,                          /* Execution time (us)              */
       handicap,                         /* Number of queue cycles behind    */
       depth,                            /* Path depth                       */
-      exec_cksum;                       /* Checksum of the execution trace  */
+      exec_cksum,                       /* Checksum of the execution trace  */
+      input_hash;                       /* hash64 value for testcase_buf    */
 
   u8 *trace_mini;                       /* Trace bytes, if kept             */
   u32 tc_ref;                           /* Trace bytes ref count            */
@@ -200,6 +202,13 @@ struct queue_entry {
 
   struct queue_entry *mother;           /* queue entry this based on        */
 
+};
+
+struct queue_input_hash {
+  u64 hash;
+  struct queue_entry **inputs;
+  u32 inputs_count;
+  u32 allocated_inputs;
 };
 
 struct edge_entry {
@@ -442,6 +451,8 @@ typedef struct afl_state {
   afl_env_vars_t   afl_env;
 
   char **argv;                                            /* argv if needed */
+
+  struct hashmap *queue_input_hashmap;
 
   /* MOpt:
     Lots of globals, but mostly for the status UI and other things where it
