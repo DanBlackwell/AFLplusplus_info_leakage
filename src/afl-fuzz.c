@@ -870,6 +870,7 @@ int main(int argc, char **argv_orig, char **envp) {
       case 'N':                                             /* NCD based queue */
 
         afl->ncd_based_queue = true;
+        afl->disable_trim = true;
 
         u8 p;
 

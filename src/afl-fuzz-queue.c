@@ -598,6 +598,14 @@ void destroy_queue(afl_state_t *afl) {
 
 }
 
+u64 get_fav_factor(afl_state_t *afl, struct queue_entry *q) {
+  if (unlikely(afl->schedule >= RARE) || unlikely(afl->fixed_seed)) {
+    return q->len << 2;
+  } else {
+    return q->exec_us * q->len;
+  }
+}
+
 /* When we bump into a new path, we call this to see if the path appears
    more "favorable" than any of the existing ones. The purpose of the
    "favorables" is to have a minimal set of paths that trigger all the bits
@@ -612,7 +620,7 @@ void destroy_queue(afl_state_t *afl) {
 void update_bitmap_score(afl_state_t *afl, struct queue_entry *q) {
 
   u32 i;
-  u64 fav_factor;
+  u64 fav_factor = get_fav_factor(afl, q);
   u64 fuzz_p2;
 
   if (unlikely(afl->schedule >= FAST && afl->schedule < RARE))
@@ -621,16 +629,6 @@ void update_bitmap_score(afl_state_t *afl, struct queue_entry *q) {
     fuzz_p2 = next_pow2(afl->n_fuzz[q->n_fuzz_entry]);
   else
     fuzz_p2 = q->fuzz_level;
-
-  if (unlikely(afl->schedule >= RARE) || unlikely(afl->fixed_seed)) {
-
-    fav_factor = q->len << 2;
-
-  } else {
-
-    fav_factor = q->exec_us * q->len;
-
-  }
 
   /* For every byte set in afl->fsrv.trace_bits[], see if there is a previous
      winner, and how it compares to us. */

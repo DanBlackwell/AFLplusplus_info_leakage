@@ -218,13 +218,15 @@ float calc_NCDm(afl_state_t *afl,
 }
 
 /* Returns the index of the existing candidate that when replaced give the
- * largest NCD, or -1 if the new_entry cannot beat any others */
+ * largest NCD. If forced is false, then return -1 if the new_entry cannot beat
+ * any others. If forced is true then just find best candidate regardless */
 
 int find_eviction_candidate(afl_state_t *afl,
                             float existing_entries_NCD,
                             struct queue_entry **existing_edge_entries,
                             int existing_entries_count,
-                            struct queue_entry *new_entry) {
+                            struct queue_entry *new_entry,
+                            bool forced) {
   if (existing_entries_count > 32) {
     PFATAL("Cannot handle more than 32 entries\n");
   }
@@ -232,7 +234,7 @@ int find_eviction_candidate(afl_state_t *afl,
   struct queue_entry *all_entries[33];
 
   int evictionCandidate = -1;
-  float bestNCD = existing_entries_NCD;
+  float bestNCD = forced ? 0.0f : existing_entries_NCD;
 
   for (int i = 0; i < existing_entries_count; i++) {
     memcpy(all_entries, existing_edge_entries, sizeof(existing_edge_entries) * i);
@@ -251,7 +253,7 @@ int find_eviction_candidate(afl_state_t *afl,
 #ifdef NOISY
   printf("  New best candidate NCD: %0.05f [was: %0.05f]\n", bestNCD, initialNCD);
 #endif
-  if (bestNCD <= existing_entries_NCD) {
+  if (!forced && bestNCD <= existing_entries_NCD) {
     return -1;
   }
 
@@ -813,7 +815,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
 
             this_edge->normalised_compression_dist = calc_NCDm(afl, this_edge->entries, this_edge->entry_count);
             inserted = true;
-            update_bitmap_score(afl, new);
+            calibrate_case(afl, new, new->testcase_buf, afl->queue_cycle - 1, 0);
             continue;
           }
 
@@ -848,22 +850,31 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
 
           // We haven't found any duplicates to kick out, let's see if NCD wins
           if (evictionCandidate == -1) {
-            bool should_calc_NCD =
-                this_edge->hit_count <= 10 ||
-                (this_edge->hit_count <= 100 && this_edge->hit_count % 10 == 0) ||
-                (this_edge->hit_count <= 1000 && this_edge->hit_count % 100 == 0);
+            bool found_favored = false;
+//            u64 fav_factor = get_fav_factor(afl, q_entry);
+//            u32 trace_byte = 2 * edgeNum;
+//            if (fav_factor < get_fav_factor(afl, afl->top_rated[trace_byte])) {
+//              printf("Found a better entry for %d, exec_us: %u, len: %u, (%llu < %llu)\n", trace_byte, q_entry->exec_us, q_entry->len, fav_factor, get_fav_factor(afl, afl->top_rated[trace_byte]));
+////              found_favored = true;
+//            } else {
+              bool should_calc_NCD =
+                  this_edge->hit_count <= 10 ||
+                  (this_edge->hit_count <= 100 && this_edge->hit_count % 10 == 0) ||
+                  (this_edge->hit_count <= 1000 && this_edge->hit_count % 100 == 0);
 
-            if (!should_calc_NCD) {
-              //            printf("  hit count: %d, not going to check NCD\n", this_edge->hit_count);
-            } else {
-              evictionCandidate = find_eviction_candidate(
-                  afl,
-                  this_edge->normalised_compression_dist,
-                  this_edge->entries,
-                  this_edge->entry_count,
-                  q_entry
-              );
-            }
+              if (!should_calc_NCD) {
+                continue;
+              }
+//            }
+
+            evictionCandidate = find_eviction_candidate(
+                afl,
+                this_edge->normalised_compression_dist,
+                this_edge->entries,
+                this_edge->entry_count,
+                q_entry,
+                found_favored
+            );
             if (evictionCandidate == -1) { continue; }
           }
 
@@ -878,7 +889,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
 
           this_edge->replacement_count++;
           this_edge->normalised_compression_dist = calc_NCDm(afl, this_edge->entries, this_edge->entry_count);
-          update_bitmap_score(afl, evictee);
+          calibrate_case(afl, evictee, evictee->testcase_buf, afl->queue_cycle - 1, 0);
           inserted = true;
         }
       }
