@@ -697,6 +697,7 @@ void update_bitmap_score(afl_state_t *afl, struct queue_entry *q) {
 
       /* Insert ourselves as the new winner. */
 
+      printf("Inserting entry for top_rated[%d]\n", i);
       afl->top_rated[i] = q;
       ++q->tc_ref;
 

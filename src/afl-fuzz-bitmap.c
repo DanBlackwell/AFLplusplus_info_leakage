@@ -889,6 +889,22 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
 
           this_edge->replacement_count++;
           this_edge->normalised_compression_dist = calc_NCDm(afl, this_edge->entries, this_edge->entry_count);
+
+          if (evictee->favored) {
+            for (u32 i = 0; i < afl->fsrv.map_size; i++) {
+              if (afl->top_rated[i] == evictee) {
+                printf("Removing top_rated[%d]\n", i);
+                afl->top_rated[i] = NULL;
+
+                if (!afl->fsrv.trace_bits[i]) {
+                  struct queue_entry *entry_for_edge = afl->edge_entries[2 * (edgeNum + i)].entries[0];
+                  printf("New entry doesn't cover %i, inserting %p\n", i, entry_for_edge);
+                  calibrate_case(afl, entry_for_edge, entry_for_edge->testcase_buf, afl->queue_cycle - 1, 0);
+                }
+              }
+            }
+          }
+
           calibrate_case(afl, evictee, evictee->testcase_buf, afl->queue_cycle - 1, 0);
           inserted = true;
         }
