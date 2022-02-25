@@ -709,24 +709,28 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
   int edgeNum = 0;
   while (i--) {
     if (*current) {
-      u16 mem16[4];
-      memcpy(mem16, current, sizeof(mem16));
+      u8 mem8[8];
+      memcpy(mem8, current, sizeof(mem8));
 
-      mem16[0] = count_class_lookup16[mem16[0]];
-      mem16[1] = count_class_lookup16[mem16[1]];
-      mem16[2] = count_class_lookup16[mem16[2]];
-      mem16[3] = count_class_lookup16[mem16[3]];
+      mem8[0] = count_class_lookup8[mem8[0]];
+      mem8[1] = count_class_lookup8[mem8[1]];
+      mem8[2] = count_class_lookup8[mem8[2]];
+      mem8[3] = count_class_lookup8[mem8[3]];
+      mem8[4] = count_class_lookup8[mem8[4]];
+      mem8[5] = count_class_lookup8[mem8[5]];
+      mem8[6] = count_class_lookup8[mem8[6]];
+      mem8[7] = count_class_lookup8[mem8[7]];
 
-      for (int i = 0; i < 4; i++) {
-        if (mem16[i]) {
+      for (int i = 0; i < 8; i++) {
+        if (mem8[i]) {
           int reps = 0;
-          u16 class = mem16[i];
+          u16 class = mem8[i];
           while ((class >> reps) > 1) reps++;
 
-          u16 restored[4];
+          u8 restored[8];
           memcpy(restored, current, sizeof(restored));
 
-          u32 edge_entries_pos = 16 * (edgeNum + i) + reps;
+          u32 edge_entries_pos = 8 * (edgeNum + i) + reps;
           struct edge_entry *this_edge = &afl->edge_entries[edge_entries_pos];
           this_edge->hit_count++;
 #ifdef NOISY
@@ -896,10 +900,27 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
                 printf("Removing top_rated[%d]\n", i);
                 afl->top_rated[i] = NULL;
 
+                // This new entry doesn't cover that edge - find a replacement!
                 if (!afl->fsrv.trace_bits[i]) {
-                  struct queue_entry *entry_for_edge = afl->edge_entries[2 * (edgeNum + i)].entries[0];
-                  printf("New entry doesn't cover %i, inserting %p\n", i, entry_for_edge);
-                  calibrate_case(afl, entry_for_edge, entry_for_edge->testcase_buf, afl->queue_cycle - 1, 0);
+                  u64 best_fav_score = UINT64_MAX;
+                  struct queue_entry *best_entry = NULL;
+
+                  // Go through all the edge_entries by bin
+                  for (int reps = 0; reps < 8; reps++) {
+                    struct edge_entry *edgeEntry = &afl->edge_entries[8 * i + reps];
+
+                    // Go through all the queue_entries for this bin
+                    for (int entry = 0; entry < edgeEntry->entry_count; entry++) {
+                      u64 fav_score = get_fav_factor(afl, edgeEntry->entries[entry]);
+                      if (fav_score < best_fav_score) {
+                        best_fav_score = fav_score;
+                        best_entry = edgeEntry->entries[entry];
+                      }
+                    }
+                  }
+
+                  printf("New entry doesn't cover %i, inserting %p\n", i, best_entry);
+                  calibrate_case(afl, best_entry, best_entry->testcase_buf, afl->queue_cycle - 1, 0);
                 }
               }
             }
@@ -912,7 +933,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
     }
 
     current++;
-    edgeNum += 4;
+    edgeNum += 8;
   }
 
   return inserted;
