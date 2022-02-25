@@ -897,7 +897,6 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
           if (evictee->favored) {
             for (u32 i = 0; i < afl->fsrv.map_size; i++) {
               if (afl->top_rated[i] == evictee) {
-                printf("Removing top_rated[%d]\n", i);
                 afl->top_rated[i] = NULL;
 
                 // This new entry doesn't cover that edge - find a replacement!
@@ -919,7 +918,6 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
                     }
                   }
 
-                  printf("New entry doesn't cover %i, inserting %p\n", i, best_entry);
                   calibrate_case(afl, best_entry, best_entry->testcase_buf, afl->queue_cycle - 1, 0);
                 }
               }

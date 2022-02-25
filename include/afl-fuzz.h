@@ -1096,6 +1096,7 @@ void discover_word(u8 *ret, u64 *current, u64 *virgin);
 void discover_word(u8 *ret, u32 *current, u32 *virgin);
 #endif
 void init_count_class16(void);
+u8 save_to_edge_entries(afl_state_t *, struct queue_entry *, u8);
 void minimize_bits(afl_state_t *, u8 *, u8 *);
 #ifndef SIMPLE_FILES
 u8 *describe_op(afl_state_t *, u8, u8, size_t);

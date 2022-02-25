@@ -1162,7 +1162,7 @@ void perform_dry_run(afl_state_t *afl) {
 
     if (afl->hashfuzz_enabled) {
       check_if_new_partition(q->exec_cksum, q->hashfuzzClass);
-    } else if (afl->ncd_based_queue) {
+    } else if (afl->ncd_based_queue && q->testcase_buf) {
       struct queue_input_hash new = { .hash = q->input_hash };
       new.allocated_inputs = 8;
       new.inputs = ck_alloc(sizeof(new.inputs) * new.allocated_inputs);
