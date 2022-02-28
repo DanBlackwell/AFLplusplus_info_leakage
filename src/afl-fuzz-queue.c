@@ -590,6 +590,7 @@ void destroy_queue(afl_state_t *afl) {
     struct queue_entry *q;
 
     q = afl->queue_buf[i];
+    ck_free(q->testcase_buf);
     ck_free(q->fname);
     ck_free(q->trace_mini);
     ck_free(q);
@@ -686,7 +687,7 @@ void update_bitmap_score(afl_state_t *afl, struct queue_entry *q) {
         /* Looks like we're going to win. Decrease ref count for the
            previous winner, discard its afl->fsrv.trace_bits[] if necessary. */
 
-        if (!--afl->top_rated[i]->tc_ref) {
+        if (!afl->ncd_based_queue && !--afl->top_rated[i]->tc_ref) {
 
           ck_free(afl->top_rated[i]->trace_mini);
           afl->top_rated[i]->trace_mini = 0;

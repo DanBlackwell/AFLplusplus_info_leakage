@@ -2493,6 +2493,11 @@ stop_fuzzing:
 
   }
 
+  ck_free(afl->n_fuzz);
+  ck_free(afl->edge_entries);
+  hashmap_clear(afl->queue_input_hashmap, false);
+  ck_free(afl->queue_input_hashmap);
+
   afl_fsrv_deinit(&afl->fsrv);
 
   /* remove tmpfile */

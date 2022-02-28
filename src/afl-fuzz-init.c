@@ -896,11 +896,14 @@ void perform_dry_run(afl_state_t *afl) {
       q->hashfuzzClass = hashfuzzClassify(use_mem, read_len, afl->hashfuzz_partitions);
     }
 
+    res = calibrate_case(afl, q, use_mem, 0, 1);
+
     if (afl->ncd_based_queue) {
       q->input_hash = hash64(use_mem, read_len, HASH_CONST);
+      u32 len = (afl->fsrv.map_size >> 3);
+      q->trace_mini = ck_alloc(len);
+      minimize_bits(afl, q->trace_mini, afl->fsrv.trace_bits);
     }
-
-    res = calibrate_case(afl, q, use_mem, 0, 1);
 
     if (afl->stop_soon) { return; }
 

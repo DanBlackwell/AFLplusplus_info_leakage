@@ -144,19 +144,21 @@ float calc_NCDm(afl_state_t *afl,
 
   for (int i = 0; i < queue_entries_count; i++) {
     struct queue_entry *entry = queue_entries[i];
-    totalLen += entry->len;
+    u32 len = (afl->fsrv.map_size >> 3);
+    totalLen += len;
 
-    if (unlikely(!entry->compressed_len || !entry->testcase_buf)) {
-      u8 *input_buf = entry->testcase_buf;
+    if (unlikely(!entry->compressed_len || !entry->trace_mini)) {
+      u8 *input_buf = entry->trace_mini;
 
       if (!input_buf) {
+        FATAL("No trace_mini for input!");
         printf("Oops - missing buffer for entry\n");
         input_buf = queue_testcase_get(afl, entry);
       }
 
       entry->compressed_len = LZ4_compress_default(input_buf,
                                                    compressedData,
-                                                   (int)entry->len,
+                                                   (int)len,
                                                    (int)maxCompressedLen);
     }
 
@@ -170,19 +172,20 @@ float calc_NCDm(afl_state_t *afl,
     while (val > 1) { bitcnt++; val >>= 1; }
     prevLongest = 1 << (bitcnt + 2);  // round up to next power of 2
 
-    uncompressedData = realloc(uncompressedData, prevLongest);
+    uncompressedData = ck_realloc(uncompressedData, prevLongest);
     if (!uncompressedData) printf("Realloc FAILED!\n");
 
     maxCompressedLen = LZ4_compressBound((int)prevLongest);
-    compressedData = realloc(compressedData, maxCompressedLen);
+    compressedData = ck_realloc(compressedData, maxCompressedLen);
     if (!compressedData) printf("Realloc FAILED!\n");
   }
 
   u32 pos = 0;
   for (int i = 0; i < queue_entries_count; i++) {
     struct queue_entry *entry = queue_entries[i];
-    memcpy(uncompressedData + pos, entry->testcase_buf, entry->len);
-    pos += entry->len;
+    u32 len = (afl->fsrv.map_size >> 3);
+    memcpy(uncompressedData + pos, entry->trace_mini, len);
+    pos += len;
   }
   u32 fullSetCompressedLen = LZ4_compress_default(uncompressedData,
                                                   compressedData,
@@ -195,8 +198,9 @@ float calc_NCDm(afl_state_t *afl,
     for (int i = 0; i < queue_entries_count; i++) {
       if (i == leftOut) continue;
       struct queue_entry *entry = queue_entries[i];
-      memcpy(uncompressedData + pos, entry->testcase_buf, entry->len);
-      pos += entry->len;
+      u32 len = (afl->fsrv.map_size >> 3);
+      memcpy(uncompressedData + pos, entry->trace_mini, len);
+      pos += len;
     }
 
     u32 compressedLen = LZ4_compress_default(uncompressedData,
@@ -636,11 +640,12 @@ void move_queue_entry_to_correct_input_hash(afl_state_t *afl, struct queue_entry
 void swap_in_candidate(afl_state_t *afl, struct queue_entry *evictee, struct queue_entry *new) {
   move_queue_entry_to_correct_input_hash(afl, evictee, new);
 
-  free(evictee->testcase_buf);
+  ck_free(evictee->testcase_buf);
   evictee->len = new->len;
-  evictee->testcase_buf = malloc(new->len);
+  evictee->testcase_buf = ck_alloc(new->len);
   memcpy(evictee->testcase_buf, new->testcase_buf, new->len);
   evictee->compressed_len = new->compressed_len;
+  memcpy(evictee->trace_mini, new->trace_mini, afl->fsrv.map_size >> 3);
 
   int fd = open(evictee->fname, O_WRONLY | O_TRUNC, DEFAULT_PERMISSION);
   if (unlikely(fd < 0)) { PFATAL("Unable to open '%s'", evictee->fname); }
@@ -649,7 +654,7 @@ void swap_in_candidate(afl_state_t *afl, struct queue_entry *evictee, struct que
 
   char *pathEnd = strrchr(evictee->fname, '/');
   size_t maxLen = NAME_MAX + (pathEnd - (char *)evictee->fname);
-  char *newFilename = malloc(maxLen);
+  char *newFilename = ck_alloc(maxLen);
   long newFilenameLen = 0;
   char *opPos = strstr(evictee->fname, ",op:");
   if (!opPos) {
@@ -677,7 +682,7 @@ void swap_in_candidate(afl_state_t *afl, struct queue_entry *evictee, struct que
     FATAL("Failed to rename %s to %s\n", evictee->fname, newFilename);
   }
 
-  free(evictee->fname);
+  ck_free(evictee->fname);
   evictee->fname = newFilename;
 }
 
@@ -789,9 +794,10 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
                          q_entry->exec_cksum,
                          new_bits);
             struct queue_entry *new = afl->queue_top;
-            new->testcase_buf = malloc(new->len);
+            new->testcase_buf = ck_alloc(new->len);
             memcpy(new->testcase_buf, q_entry->testcase_buf, new->len);
             new->input_hash = hash64(new->testcase_buf, new->len, HASH_CONST);
+            new->trace_mini = q_entry->trace_mini;
 
             if (found) {
               if (found->inputs_count == found->allocated_inputs) {
@@ -861,14 +867,14 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
 //              printf("Found a better entry for %d, exec_us: %u, len: %u, (%llu < %llu)\n", trace_byte, q_entry->exec_us, q_entry->len, fav_factor, get_fav_factor(afl, afl->top_rated[trace_byte]));
 ////              found_favored = true;
 //            } else {
-              bool should_calc_NCD =
-                  this_edge->hit_count <= 10 ||
-                  (this_edge->hit_count <= 100 && this_edge->hit_count % 10 == 0) ||
-                  (this_edge->hit_count <= 1000 && this_edge->hit_count % 100 == 0);
+            bool should_calc_NCD =
+                this_edge->hit_count <= 10 ||
+                (this_edge->hit_count <= 100 && this_edge->hit_count % 10 == 0) ||
+                (this_edge->hit_count <= 1000 && this_edge->hit_count % 100 == 0);
 
-              if (!should_calc_NCD) {
-                continue;
-              }
+            if (!should_calc_NCD) {
+              continue;
+            }
 //            }
 
             evictionCandidate = find_eviction_candidate(
@@ -879,7 +885,9 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
                 q_entry,
                 found_favored
             );
-            if (evictionCandidate == -1) { continue; }
+            if (evictionCandidate == -1) {
+              continue;
+            }
           }
 
           // We have a real candidate to evict...
@@ -1260,35 +1268,41 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     if (afl->ncd_based_queue) {
     // Dump out some trace debug info
 //    if (is_interesting(afl)) {
-      if (2 * len > prevLongest) {
-        u32 bitcnt = 0, val = len;
-        while (val > 1) { bitcnt++; val >>= 1; }
-        prevLongest = 1 << (bitcnt + 2);  // round up to next power of 2
-
-        uncompressedData = realloc(uncompressedData, prevLongest);
-        if (!uncompressedData) printf("Realloc FAILED!\n");
-
-        maxCompressedLen = LZ4_compressBound((int)prevLongest);
-        compressedData = realloc(compressedData, maxCompressedLen);
-        if (!compressedData) printf("Realloc FAILED!\n");
-      }
-
-      compressedLen = LZ4_compress_default(mem, compressedData, (int)len, (int)maxCompressedLen);
-      if (!compressedLen) {
-        interesting = false;
-        PFATAL("Serious ERROR: compressedLen failed\n");
-      }
-
       cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
 
       struct queue_entry new = {
           .testcase_buf = mem,
           .len = len,
-          .compressed_len = compressedLen,
           .exec_cksum = cksum,
       };
 
-      save_to_edge_entries(afl, &new, new_bits);
+      u32 trace_map_len = (afl->fsrv.map_size >> 3);
+      if (2 * trace_map_len > prevLongest) {
+        u32 bitcnt = 0, val = trace_map_len;
+        while (val > 1) { bitcnt++; val >>= 1; }
+        prevLongest = 1 << (bitcnt + 2);  // round up to next power of 2
+
+        uncompressedData = ck_realloc(uncompressedData, prevLongest);
+        if (!uncompressedData) printf("Realloc FAILED!\n");
+
+        maxCompressedLen = LZ4_compressBound((int)prevLongest);
+        compressedData = ck_realloc(compressedData, maxCompressedLen);
+        if (!compressedData) printf("Realloc FAILED!\n");
+      }
+
+      new.trace_mini = ck_alloc(trace_map_len);
+      minimize_bits(afl, new.trace_mini, afl->fsrv.trace_bits);
+      new.compressed_len = LZ4_compress_default(
+          new.trace_mini, compressedData,
+          (int)trace_map_len, (int)maxCompressedLen
+      );
+      if (!compressedLen) {
+        interesting = false;
+        PFATAL("Serious ERROR: compressedLen failed\n");
+      }
+
+      bool inserted = save_to_edge_entries(afl, &new, new_bits);
+      if (!inserted) ck_free(new.trace_mini);
     }
 
     if (afl->hashfuzz_enabled) {
