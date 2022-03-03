@@ -151,6 +151,7 @@ float calc_NCDm(afl_state_t *afl,
       u8 *input_buf = entry->trace_mini;
 
       if (!input_buf) {
+        *(int *)0 = 6;
         FATAL("No trace_mini for input!");
         printf("Oops - missing buffer for entry\n");
         input_buf = queue_testcase_get(afl, entry);
@@ -598,6 +599,11 @@ void move_queue_entry_to_correct_input_hash(afl_state_t *afl, struct queue_entry
 
   struct queue_input_hash input_hash = { .hash = evictee->input_hash };
   struct queue_input_hash *found = hashmap_get(afl->queue_input_hashmap, &input_hash);
+
+  if (found->hash != evictee->input_hash) {
+    FATAL("found->hash %020llu != evictee->input_hash %020llu", found->hash, evictee->input_hash);
+  }
+
   if (!found) {
     FATAL("Failed to find queue_input_hash for %020llu\n", hash);
   }
@@ -607,14 +613,32 @@ void move_queue_entry_to_correct_input_hash(afl_state_t *afl, struct queue_entry
     struct queue_entry *entry = found->inputs[i];
     if (entry == evictee) { removed = true; }
     if (removed && i < found->inputs_count - 1) {
+//      printf("Moving %p from %d to %d [len: %d]\n", &found->inputs[i], i + 1, i, found->inputs_count);
       found->inputs[i] = found->inputs[i + 1];
     }
   }
+  found->inputs_count--;
+
 
   if (!removed) {
-    FATAL("Failed to find this queue_entry (%p) in list of found->inputs %020llu\n", evictee, hash);
+    int pos = -1;
+    if (found->inputs_count < 1000 && found->inputs_count >= 0) {
+      for (int i = 0; i < afl->queued_paths; i++) {
+        if (afl->queue_buf[i] == evictee) {
+          pos = i;
+          break;
+        }
+      }
+    } else { printf("found->inputs_count = %d\n", found->inputs_count); }
+
+    printf("Found for %020llu (%d): ", found->hash, found->inputs_count);
+    for (int i = 0; i < found->inputs_count; i++) {
+      printf("%p, ", found->inputs[i]);
+    }
+    printf("\n");
+    FATAL("Failed to find this queue_entry[%d] (%p) in list of found->inputs %020llu\n", pos, evictee, hash);
   }
-  found->inputs_count--;
+//  printf("Found queue_entry[%d] (%p) in list of found->inputs %020llu\n", pos, evictee, hash);
 
   // Then let's insert this evictee into its new hash
   hash = hash64(new->testcase_buf, new->len, HASH_CONST);
@@ -622,6 +646,7 @@ void move_queue_entry_to_correct_input_hash(afl_state_t *afl, struct queue_entry
   found = hashmap_get(afl->queue_input_hashmap, &input_hash);
 
   if (!found) {
+//    printf("moving %p from %020llu into NEW hash %020llu\n", evictee, evictee->input_hash, hash);
     input_hash.allocated_inputs = 8;
     input_hash.inputs = ck_alloc(sizeof(input_hash.inputs) * input_hash.allocated_inputs);
     input_hash.inputs[0] = evictee;
@@ -632,6 +657,7 @@ void move_queue_entry_to_correct_input_hash(afl_state_t *afl, struct queue_entry
       found->allocated_inputs *= 2;
       found->inputs = ck_realloc(found->inputs, sizeof(found->inputs) * found->allocated_inputs);
     }
+//    printf("moving %p from %020llu to EXISTING hash %020llu at pos %d\n", evictee, evictee->input_hash, hash, found->inputs_count);
     found->inputs[found->inputs_count] = evictee;
     found->inputs_count++;
   }
@@ -696,6 +722,32 @@ u8 *get_filename(afl_state_t *afl, u64 cksum, struct edge_entry *entry) {
       describe_op(afl, 0, entry->entry_count > 0, NAME_MAX - 35));
 }
 
+void fill_trace_mini_and_compressed_len(afl_state_t  *afl, struct queue_entry *q_entry) {
+  u32 trace_map_len = (afl->fsrv.map_size >> 3);
+  if (2 * trace_map_len > prevLongest) {
+    u32 bitcnt = 0, val = trace_map_len;
+    while (val > 1) { bitcnt++; val >>= 1; }
+    prevLongest = 1 << (bitcnt + 2);  // round up to next power of 2
+
+    uncompressedData = ck_realloc(uncompressedData, prevLongest);
+    if (!uncompressedData) printf("Realloc FAILED!\n");
+
+    maxCompressedLen = LZ4_compressBound((int)prevLongest);
+    compressedData = ck_realloc(compressedData, maxCompressedLen);
+    if (!compressedData) printf("Realloc FAILED!\n");
+  }
+
+  q_entry->trace_mini = ck_alloc(trace_map_len);
+  minimize_bits(afl, q_entry->trace_mini, afl->fsrv.trace_bits);
+  q_entry->compressed_len = LZ4_compress_default(
+      q_entry->trace_mini, compressedData,
+      (int)trace_map_len, (int)maxCompressedLen
+  );
+  if (!q_entry->compressed_len) {
+    FATAL("compressedLen failed!");
+  }
+}
+
 u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bits) {
   if (unlikely(!afl->edge_entry_count)) {
     printf("Skipping is_interesting as afl not yet inited\n");
@@ -709,6 +761,15 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
   I HAVE NOT IMPLEMENTED 32 BIT sorry
 #endif
 
+  struct queue_input_hash input_hash = {};
+  struct queue_input_hash *found = NULL;
+
+  u64 hash = hash64(q_entry->testcase_buf, q_entry->len, HASH_CONST);
+  q_entry->input_hash = hash;
+  input_hash.hash = hash;
+  found = hashmap_get(afl->queue_input_hashmap, &input_hash);
+  bool is_duplicate = found != NULL;
+
   u8 inserted = false;
 
   int edgeNum = 0;
@@ -717,230 +778,242 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
       u8 mem8[8];
       memcpy(mem8, current, sizeof(mem8));
 
-      mem8[0] = count_class_lookup8[mem8[0]];
-      mem8[1] = count_class_lookup8[mem8[1]];
-      mem8[2] = count_class_lookup8[mem8[2]];
-      mem8[3] = count_class_lookup8[mem8[3]];
-      mem8[4] = count_class_lookup8[mem8[4]];
-      mem8[5] = count_class_lookup8[mem8[5]];
-      mem8[6] = count_class_lookup8[mem8[6]];
-      mem8[7] = count_class_lookup8[mem8[7]];
-
       for (int i = 0; i < 8; i++) {
-        if (mem8[i]) {
-          int reps = 0;
-          u16 class = mem8[i];
-          while ((class >> reps) > 1) reps++;
+        if (!mem8[i]) continue;
 
-          u8 restored[8];
-          memcpy(restored, current, sizeof(restored));
+        int reps = 0;
+        u16 class = count_class_lookup8[mem8[i]];
+        while ((class >> reps) > 1) reps++;
 
-          u32 edge_entries_pos = 8 * (edgeNum + i) + reps;
-          struct edge_entry *this_edge = &afl->edge_entries[edge_entries_pos];
-          this_edge->hit_count++;
+        u32 edge_entries_pos = 8 * (edgeNum + i) + reps;
+        struct edge_entry *this_edge = &afl->edge_entries[edge_entries_pos];
+        this_edge->hit_count++;
 #ifdef NOISY
-          printf("Hit edge: %hu, bucket: %hu\n", this_edge->edge_num, this_edge->edge_frequency);
+        printf("Hit edge: %hu, bucket: %hu\n", this_edge->edge_num, this_edge->edge_frequency);
 #endif
 
-          bool match = false;
-          for (int i = 0; i < this_edge->entry_count; i++) {
-            if (this_edge->entries[i]->len != q_entry->len) {
-              continue;
-            }
-
-            if (!memcmp(this_edge->entries[i]->testcase_buf, q_entry->testcase_buf, q_entry->len)) {
-              match = true;
-              break;
-            }
-          }
-
-          // we already have this entry in the queue
-          if (match) {
-#ifdef NOISY
-            printf("  Identical to existing queue entry, skipping\n");
-#endif
+        bool match = false;
+        for (int i = 0; i < this_edge->entry_count; i++) {
+          if (this_edge->entries[i]->len != q_entry->len) {
             continue;
           }
 
-          if (this_edge->entry_count < afl->ncd_entries_per_edge) {
-            struct queue_input_hash *found = NULL;
-            struct queue_input_hash input_hash = {};
+          if (!memcmp(this_edge->entries[i]->testcase_buf, q_entry->testcase_buf, q_entry->len)) {
+            match = true;
+            break;
+          }
+        }
 
-            if (this_edge->entry_count == 0) {
-              this_edge->discovery_execs = afl->fsrv.total_execs;
-            }
-
-            u64 hash = hash64(q_entry->testcase_buf, q_entry->len, HASH_CONST);
-            input_hash.hash = hash;
-            found = hashmap_get(afl->queue_input_hashmap, &input_hash);
-            if (this_edge->entry_count > 0 && found) {
-              continue;
-            }
+        // we already have this entry in the queue
+        if (match) {
 #ifdef NOISY
-            printf("  Inserting candidate w checksum %020llu at pos %d\n",
+          printf("  Identical to existing queue entry, skipping\n");
+#endif
+          continue;
+        }
+
+        if (this_edge->entry_count < afl->ncd_entries_per_edge) {
+          if (this_edge->entry_count == 0) {
+            this_edge->discovery_execs = afl->fsrv.total_execs;
+          }
+
+          if (this_edge->entry_count > 0 && is_duplicate) {
+            continue;
+          }
+#ifdef NOISY
+          printf("  Inserting candidate w checksum %020llu at pos %d\n",
                    q_entry->exec_cksum, this_edge->entry_count);
 #endif
 
-            u8 *queue_fname = get_filename(afl, q_entry->exec_cksum, this_edge);
-            int fd = open(queue_fname, O_WRONLY | O_CREAT | O_EXCL, DEFAULT_PERMISSION);
-            if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", queue_fname); }
-            ck_write(fd, q_entry->testcase_buf, q_entry->len, queue_fname);
-            close(fd);
-            add_to_queue(afl,
-                         queue_fname,
-                         q_entry->len,
-                         0,
-                         this_edge->entry_count,
-                         q_entry->exec_cksum,
-                         new_bits);
-            struct queue_entry *new = afl->queue_top;
-            new->testcase_buf = ck_alloc(new->len);
-            memcpy(new->testcase_buf, q_entry->testcase_buf, new->len);
-            new->input_hash = hash64(new->testcase_buf, new->len, HASH_CONST);
-            new->trace_mini = q_entry->trace_mini;
+          u8 *queue_fname = get_filename(afl, q_entry->exec_cksum, this_edge);
+          int fd = open(queue_fname, O_WRONLY | O_CREAT | O_EXCL, DEFAULT_PERMISSION);
+          if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", queue_fname); }
+          ck_write(fd, q_entry->testcase_buf, q_entry->len, queue_fname);
+          close(fd);
+          add_to_queue(afl,
+                       queue_fname,
+                       q_entry->len,
+                       0,
+                       this_edge->entry_count,
+                       q_entry->exec_cksum,
+                       new_bits);
+          struct queue_entry *new = afl->queue_top;
+//          if (afl->queued_paths < 3) { printf("Just added queue_entry[%d] %p\n", afl->queued_paths - 1, new); }
+          new->testcase_buf = ck_alloc(new->len);
+          memcpy(new->testcase_buf, q_entry->testcase_buf, new->len);
+          new->input_hash = hash64(new->testcase_buf, new->len, HASH_CONST);
+          new->trace_mini = ck_alloc(afl->fsrv.map_size >> 3);
+          if (!q_entry->trace_mini)
+            fill_trace_mini_and_compressed_len(afl, q_entry);
+          memcpy(new->trace_mini, q_entry->trace_mini, afl->fsrv.map_size >> 3);
 
-            if (found) {
-              if (found->inputs_count == found->allocated_inputs) {
-                found->allocated_inputs *= 2;
-                found->inputs = ck_realloc(
-                    found->inputs,
-                    found->allocated_inputs * sizeof(found->inputs)
-                );
-              }
-
-              found->inputs[found->inputs_count] = new;
-              found->inputs_count++;
-            } else {
-              input_hash.hash = new->input_hash;
-              input_hash.allocated_inputs = 8;
-              input_hash.inputs = ck_alloc(input_hash.allocated_inputs *
-                                           sizeof(input_hash.inputs));
-              input_hash.inputs[0] = new;
-              input_hash.inputs_count = 1;
-              hashmap_set(afl->queue_input_hashmap, &input_hash);
-            }
-
-            this_edge->entries[this_edge->entry_count] = new;
-            this_edge->entry_count++;
-
-            this_edge->normalised_compression_dist = calc_NCDm(afl, this_edge->entries, this_edge->entry_count);
-            inserted = true;
-            calibrate_case(afl, new, new->testcase_buf, afl->queue_cycle - 1, 0);
-            continue;
-          }
-
-          struct queue_input_hash *found = NULL;
-          struct queue_input_hash input_hash = {};
-
-          u64 hash = hash64(q_entry->testcase_buf, q_entry->len, HASH_CONST);
-          input_hash.hash = hash;
-          found = hashmap_get(afl->queue_input_hashmap, &input_hash);
 
           if (found) {
-            // This queue_entry already exists for another edge
-            continue;
-          }
-
-          int evictionCandidate = -1;
-
-          // let's see if any entries are duplicates and mark for eviction:
-          for (u32 i = 0; i < this_edge->entry_count; i++) {
-            struct queue_entry *entry = this_edge->entries[i];
-            input_hash.hash = entry->input_hash;
-            found = hashmap_get(afl->queue_input_hashmap, &input_hash);
-            if (!found) {
-              FATAL("Failed to find input_hash for %020llu for edge %d\n", input_hash.hash, this_edge->edge_num);
+            if (found->inputs_count == found->allocated_inputs) {
+              found->allocated_inputs *= 2;
+              found->inputs = ck_realloc(
+                  found->inputs,
+                  found->allocated_inputs * sizeof(found->inputs)
+              );
             }
 
-            if (found->inputs_count > 1) {
-              evictionCandidate = (int)i;
-              break;
-            }
+            if (found->hash != new->input_hash)
+              FATAL("found->hash %020llu != new->input_hash %020llu", found->hash, new->input_hash);
+
+//            printf("Storing queue_entry[%d] (%p) in EXISTING hash %020llu in the hashmap at pos %d\n", afl->queued_paths - 1, new, new->input_hash, found->inputs_count);
+            found->inputs[found->inputs_count] = new;
+            found->inputs_count++;
+          } else {
+            struct queue_input_hash new_hash = {};
+            new_hash.hash = new->input_hash;
+            new_hash.allocated_inputs = 8;
+            new_hash.inputs = ck_alloc(new_hash.allocated_inputs *
+                                         sizeof(new_hash.inputs));
+            new_hash.inputs[0] = new;
+            new_hash.inputs_count = 1;
+//            printf("Storing queue_entry[%d] (%p) into NEW hash %020llu in the hashmap\n", afl->queued_paths - 1, new, new_hash.hash);
+            hashmap_set(afl->queue_input_hashmap, &new_hash);
+            found = hashmap_get(afl->queue_input_hashmap, &new_hash);
+            is_duplicate = true;
           }
 
-          // We haven't found any duplicates to kick out, let's see if NCD wins
-          if (evictionCandidate == -1) {
-            bool found_favored = false;
+          this_edge->entries[this_edge->entry_count] = new;
+          this_edge->entry_count++;
+
+          this_edge->normalised_compression_dist = calc_NCDm(afl, this_edge->entries, this_edge->entry_count);
+          inserted = true;
+          calibrate_case(afl, new, new->testcase_buf, afl->queue_cycle - 1, 0);
+//          printf("Calibrated case %p [hash went from %020llu to %020llu]\n", new->input_hash, hash64(new->testcase_buf, new->len, HASH_CONST));
+          continue;
+        }
+
+        if (is_duplicate) {
+          // This queue_entry already exists for another edge
+          continue;
+        }
+
+        int evictionCandidate = -1;
+
+        // let's see if any entries are duplicates and mark for eviction:
+        for (u32 i = 0; i < this_edge->entry_count; i++) {
+          struct queue_entry *entry = this_edge->entries[i];
+          struct queue_input_hash sought = { .hash = entry->input_hash };
+          struct queue_input_hash *res = hashmap_get(afl->queue_input_hashmap, &sought);
+          if (!res) {
+            FATAL("Failed to find input_hash for %020llu for edge %d\n", sought.hash, this_edge->edge_num);
+          }
+
+          if (res->inputs_count > 1) {
+            evictionCandidate = (int)i;
+            break;
+          }
+        }
+
+        // We haven't found any duplicates to kick out, let's see if NCD wins
+        if (evictionCandidate == -1) {
+          bool found_favored = false;
 //            u64 fav_factor = get_fav_factor(afl, q_entry);
 //            u32 trace_byte = 2 * edgeNum;
 //            if (fav_factor < get_fav_factor(afl, afl->top_rated[trace_byte])) {
 //              printf("Found a better entry for %d, exec_us: %u, len: %u, (%llu < %llu)\n", trace_byte, q_entry->exec_us, q_entry->len, fav_factor, get_fav_factor(afl, afl->top_rated[trace_byte]));
 ////              found_favored = true;
 //            } else {
-            bool should_calc_NCD =
-                this_edge->hit_count <= 10 ||
-                (this_edge->hit_count <= 100 && this_edge->hit_count % 10 == 0) ||
-                (this_edge->hit_count <= 1000 && this_edge->hit_count % 100 == 0);
+          bool should_calc_NCD =
+              this_edge->hit_count <= 10 ||
+              (this_edge->hit_count <= 100 && this_edge->hit_count % 10 == 0) ||
+              (this_edge->hit_count <= 1000 && this_edge->hit_count % 100 == 0) ||
+              (this_edge->hit_count > 10000 && this_edge->hit_count % 1000 == 0);
 
-            if (!should_calc_NCD) {
-              continue;
-            }
+          if (!should_calc_NCD) {
+            continue;
+          }
 //            }
 
-            evictionCandidate = find_eviction_candidate(
-                afl,
-                this_edge->normalised_compression_dist,
-                this_edge->entries,
-                this_edge->entry_count,
-                q_entry,
-                found_favored
-            );
-            if (evictionCandidate == -1) {
-              continue;
-            }
-          }
+          if (!q_entry->trace_mini)
+            fill_trace_mini_and_compressed_len(afl, q_entry);
 
-          // We have a real candidate to evict...
-          struct queue_entry *evictee = this_edge->entries[evictionCandidate];
+          evictionCandidate = find_eviction_candidate(
+              afl,
+              this_edge->normalised_compression_dist,
+              this_edge->entries,
+              this_edge->entry_count,
+              q_entry,
+              found_favored
+          );
+          if (evictionCandidate == -1) {
+            continue;
+          }
+        }
+
+        if (!q_entry->trace_mini)
+          fill_trace_mini_and_compressed_len(afl, q_entry);
+
+        // We have a real candidate to evict...
+        struct queue_entry *evictee = this_edge->entries[evictionCandidate];
 #ifdef NOISY
-          printf("  Will evict candidate at pos %d, w checksum %020llu in favour of current w checksum %020llu\n",
+        printf("  Will evict candidate at pos %d, w checksum %020llu in favour of current w checksum %020llu\n",
                    evictionCandidate, evictee->exec_cksum, q_entry->exec_cksum);
 #endif
-          swap_in_candidate(afl, evictee, q_entry);
-          evictee->input_hash = hash64(evictee->testcase_buf, evictee->len, HASH_CONST);
+        swap_in_candidate(afl, evictee, q_entry);
+        evictee->input_hash = hash64(evictee->testcase_buf, evictee->len, HASH_CONST);
+        if (evictee->input_hash != q_entry->input_hash)
+          FATAL("evictee->input_hash %020llu != q_entry->input_hash %020llu", evictee->input_hash, q_entry->input_hash);
+        if (evictee->input_hash != input_hash.hash)
+          FATAL("evictee->input_hash %020llu != input_hash.hash %020llu", evictee->input_hash, input_hash.hash);
+        found = hashmap_get(afl->queue_input_hashmap, &input_hash);
+        is_duplicate = true;
 
-          this_edge->replacement_count++;
-          this_edge->normalised_compression_dist = calc_NCDm(afl, this_edge->entries, this_edge->entry_count);
+        this_edge->replacement_count++;
+        this_edge->normalised_compression_dist = calc_NCDm(afl, this_edge->entries, this_edge->entry_count);
 
-          if (evictee->favored) {
-            for (u32 i = 0; i < afl->fsrv.map_size; i++) {
-              if (afl->top_rated[i] == evictee) {
-                afl->top_rated[i] = NULL;
+        if (evictee->favored) {
+          for (u32 i = 0; i < afl->fsrv.map_size; i++) {
+            if (afl->top_rated[i] == evictee) {
+              afl->top_rated[i] = NULL;
 
-                // This new entry doesn't cover that edge - find a replacement!
-                if (!afl->fsrv.trace_bits[i]) {
-                  u64 best_fav_score = UINT64_MAX;
-                  struct queue_entry *best_entry = NULL;
+              // This new entry doesn't cover that edge - find a replacement!
+              if (!afl->fsrv.trace_bits[i]) {
+                u64 best_fav_score = UINT64_MAX;
+                struct queue_entry *best_entry = NULL;
 
-                  // Go through all the edge_entries by bin
-                  for (int reps = 0; reps < 8; reps++) {
-                    struct edge_entry *edgeEntry = &afl->edge_entries[8 * i + reps];
+                // Go through all the edge_entries by bin
+                for (int reps = 0; reps < 8; reps++) {
+                  struct edge_entry *edgeEntry = &afl->edge_entries[8 * i + reps];
 
-                    // Go through all the queue_entries for this bin
-                    for (int entry = 0; entry < edgeEntry->entry_count; entry++) {
-                      u64 fav_score = get_fav_factor(afl, edgeEntry->entries[entry]);
-                      if (fav_score < best_fav_score) {
-                        best_fav_score = fav_score;
-                        best_entry = edgeEntry->entries[entry];
-                      }
+                  // Go through all the queue_entries for this bin
+                  for (int entry = 0; entry < edgeEntry->entry_count; entry++) {
+                    u64 fav_score = get_fav_factor(afl, edgeEntry->entries[entry]);
+                    if (fav_score < best_fav_score) {
+                      best_fav_score = fav_score;
+                      best_entry = edgeEntry->entries[entry];
                     }
                   }
+                }
 
-                  calibrate_case(afl, best_entry, best_entry->testcase_buf, afl->queue_cycle - 1, 0);
+                if (best_entry) {
+                  calibrate_case(afl, best_entry, best_entry->testcase_buf,
+                                 afl->queue_cycle - 1, 0);
+//                  printf("Calibrated case %p [hash went from %020llu to %020llu]\n", best_entry->input_hash, hash64(best_entry->testcase_buf, best_entry->len, HASH_CONST));
+                } else {
+                  printf("Failed to find alternative favored for edge %d\n", i);
                 }
               }
             }
           }
-
-          calibrate_case(afl, evictee, evictee->testcase_buf, afl->queue_cycle - 1, 0);
-          inserted = true;
         }
+
+        calibrate_case(afl, evictee, evictee->testcase_buf, afl->queue_cycle - 1, 0);
+//        printf("Calibrated case %p [hash went from %020llu to %020llu]\n", evictee->input_hash, hash64(evictee->testcase_buf, evictee->len, HASH_CONST));
+        inserted = true;
       }
     }
 
     current++;
     edgeNum += 8;
   }
+//  printf("END CALC\n");
+
+  ck_free(q_entry->trace_mini);
 
   return inserted;
 }
@@ -1276,33 +1349,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
           .exec_cksum = cksum,
       };
 
-      u32 trace_map_len = (afl->fsrv.map_size >> 3);
-      if (2 * trace_map_len > prevLongest) {
-        u32 bitcnt = 0, val = trace_map_len;
-        while (val > 1) { bitcnt++; val >>= 1; }
-        prevLongest = 1 << (bitcnt + 2);  // round up to next power of 2
-
-        uncompressedData = ck_realloc(uncompressedData, prevLongest);
-        if (!uncompressedData) printf("Realloc FAILED!\n");
-
-        maxCompressedLen = LZ4_compressBound((int)prevLongest);
-        compressedData = ck_realloc(compressedData, maxCompressedLen);
-        if (!compressedData) printf("Realloc FAILED!\n");
-      }
-
-      new.trace_mini = ck_alloc(trace_map_len);
-      minimize_bits(afl, new.trace_mini, afl->fsrv.trace_bits);
-      new.compressed_len = LZ4_compress_default(
-          new.trace_mini, compressedData,
-          (int)trace_map_len, (int)maxCompressedLen
-      );
-      if (!compressedLen) {
-        interesting = false;
-        PFATAL("Serious ERROR: compressedLen failed\n");
-      }
-
       bool inserted = save_to_edge_entries(afl, &new, new_bits);
-      if (!inserted) ck_free(new.trace_mini);
     }
 
     if (afl->hashfuzz_enabled) {
@@ -1431,10 +1478,12 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
     }
 
-    /* Try to calibrate inline; this also calls update_bitmap_score() when
-       successful. */
+    if (!afl->ncd_based_queue) {
+      /* Try to calibrate inline; this also calls update_bitmap_score() when
+         successful. */
 
-    res = calibrate_case(afl, afl->queue_top, mem, afl->queue_cycle - 1, 0);
+      res = calibrate_case(afl, afl->queue_top, mem, afl->queue_cycle - 1, 0);
+    }
 
     if (unlikely(res == FSRV_RUN_ERROR)) {
 

@@ -136,7 +136,7 @@ endif
 
 ifdef DEBUG
   $(info Compiling DEBUG version of binaries)
-  override CFLAGS += -ggdb3 -O0 $(CFLAGS_OPT)
+  override CFLAGS += -pg -ggdb3 -O0 $(CFLAGS_OPT)
 else
   CFLAGS ?= -O3 -funroll-loops $(CFLAGS_OPT)
 endif

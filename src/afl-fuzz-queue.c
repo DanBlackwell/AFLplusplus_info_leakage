@@ -599,7 +599,7 @@ void destroy_queue(afl_state_t *afl) {
 
 }
 
-u64 get_fav_factor(afl_state_t *afl, struct queue_entry *q) {
+inline u64 get_fav_factor(afl_state_t *afl, struct queue_entry *q) {
   if (unlikely(afl->schedule >= RARE) || unlikely(afl->fixed_seed)) {
     return q->len << 2;
   } else {
