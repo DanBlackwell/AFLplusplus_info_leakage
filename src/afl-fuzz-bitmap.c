@@ -606,6 +606,8 @@ void move_queue_entry_to_correct_input_hash(afl_state_t *afl, struct queue_entry
   bool removed = false;
   for (u32 i = 0; i < found->inputs_count; i++) {
     struct queue_entry *entry = found->inputs[i];
+    entry->duplicates = found->inputs_count - 2 >= 0 ?
+                        found->inputs_count - 2 : 0;
     if (entry == evictee) { removed = true; }
     if (removed && i < found->inputs_count - 1) {
 //      printf("Moving %p from %d to %d [len: %d]\n", &found->inputs[i], i + 1, i, found->inputs_count);
@@ -640,20 +642,25 @@ void move_queue_entry_to_correct_input_hash(afl_state_t *afl, struct queue_entry
   found = hashmap_get(afl->queue_input_hashmap, &input_hash);
 
   if (!found) {
-//    printf("moving %p from %020llu into NEW hash %020llu\n", evictee, evictee->input_hash, hash);
     input_hash.allocated_inputs = 8;
     input_hash.inputs = ck_alloc(sizeof(input_hash.inputs) * input_hash.allocated_inputs);
     input_hash.inputs[0] = evictee;
+    evictee->duplicates = 0;
     input_hash.inputs_count = 1;
     hashmap_set(afl->queue_input_hashmap, &input_hash);
+
   } else {
     if (found->allocated_inputs == found->inputs_count) {
       found->allocated_inputs *= 2;
       found->inputs = ck_realloc(found->inputs, sizeof(found->inputs) * found->allocated_inputs);
     }
-//    printf("moving %p from %020llu to EXISTING hash %020llu at pos %d\n", evictee, evictee->input_hash, hash, found->inputs_count);
     found->inputs[found->inputs_count] = evictee;
     found->inputs_count++;
+
+    for (int i = 0; i < found->inputs_count; i++) {
+      found->inputs[i]->duplicates =
+          found->inputs_count - 1 >= 0 ? found->inputs_count - 1 : 0;
+    }
   }
 }
 
@@ -864,6 +871,11 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
 
             found->inputs[found->inputs_count] = new;
             found->inputs_count++;
+
+            for (int i = 0; i < found->inputs_count; i++)
+              found->inputs[i]->duplicates = found->inputs_count - 1 >= 0 ?
+                  found->inputs_count - 1 : 0;
+
           } else {
             struct queue_input_hash new_hash = {};
             new_hash.hash = new->input_hash;
@@ -912,13 +924,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
         // let's see if any entries are duplicates and mark for eviction:
         for (u32 i = 0; i < this_edge->entry_count; i++) {
           struct queue_entry *entry = this_edge->entries[i];
-          struct queue_input_hash sought = { .hash = entry->input_hash };
-          struct queue_input_hash *res = hashmap_get(afl->queue_input_hashmap, &sought);
-          if (!res) {
-            FATAL("Failed to find input_hash for %020llu for edge %d\n", sought.hash, this_edge->edge_num);
-          }
-
-          if (res->inputs_count > 1) {
+          if (entry->duplicates) {
             evictionCandidate = (int)i;
             break;
           }

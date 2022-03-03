@@ -176,7 +176,8 @@ struct queue_entry {
   u32 bitmap_size,                      /* Number of bits set in bitmap     */
       fuzz_level,                       /* Number of fuzzing iterations     */
       n_fuzz_entry,                     /* offset in n_fuzz                 */
-      compressed_len;                   /* The compressed (lz4) length      */
+      compressed_len,                   /* The compressed (lz4) length      */
+      duplicates;                       /* Number of duplicate (input) entries */
 
   u64 exec_us,                          /* Execution time (us)              */
       handicap,                         /* Number of queue cycles behind    */
