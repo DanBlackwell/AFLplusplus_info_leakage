@@ -823,10 +823,13 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
         }
 
         if (this_edge->entry_count < afl->ncd_entries_per_edge) {
+          // Let's record what execution we were on when discovering this edge
           if (this_edge->entry_count == 0) {
             this_edge->discovery_execs = afl->fsrv.total_execs;
           }
 
+          // If there's already an entry for this edge then no point in storing
+          // another copy of an input that is already in the queue
           if (this_edge->entry_count > 0 && is_duplicate) {
             continue;
           }
@@ -835,6 +838,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
                    q_entry->exec_cksum, this_edge->entry_count);
 #endif
 
+          // OK this is a new edge or unique entry so let's store it
           u8 *queue_fname = get_filename(afl, q_entry->exec_cksum, this_edge);
           int fd = open(queue_fname, O_WRONLY | O_CREAT | O_EXCL, DEFAULT_PERMISSION);
           if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", queue_fname); }
@@ -866,15 +870,15 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
               );
             }
 
-//            if (found->hash != new->input_hash)
-//              FATAL("found->hash %020llu != new->input_hash %020llu", found->hash, new->input_hash);
-
             found->inputs[found->inputs_count] = new;
             found->inputs_count++;
 
-            for (int i = 0; i < found->inputs_count; i++)
-              found->inputs[i]->duplicates = found->inputs_count - 1 >= 0 ?
-                  found->inputs_count - 1 : 0;
+            u32 duplicates = found->inputs_count - 1 >= 0 ?
+                             found->inputs_count - 1 :
+                             0;
+            for (u32 i = 0; i < found->inputs_count; i++) {
+              found->inputs[i]->duplicates = duplicates;
+            }
 
           } else {
             struct queue_input_hash new_hash = {};
@@ -932,7 +936,6 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
 
         // We haven't found any duplicates to kick out, let's see if NCD wins
         if (evictionCandidate == -1) {
-          bool found_favored = false;
           bool should_calc_NCD =
               this_edge->hit_count <= 10 ||
               (this_edge->hit_count <= 100 && this_edge->hit_count % 10 == 0) ||
@@ -952,7 +955,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
               this_edge->entries,
               this_edge->entry_count,
               q_entry,
-              found_favored
+              false
           );
           if (evictionCandidate == -1) {
             continue;
@@ -1040,7 +1043,6 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
     current++;
     edgeNum += 8;
   }
-//  printf("END CALC\n");
 
   ck_free(q_entry->trace_mini);
 
