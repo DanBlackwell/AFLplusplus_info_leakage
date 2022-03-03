@@ -134,6 +134,12 @@ ifneq "$(ARCH)" "x86_64"
  endif
 endif
 
+ifdef COVERAGE
+  $(info Compiling COVERAGE in for binaries)
+  override CFLAGS += -fprofile-arcs -ftest-coverage
+endif
+
+
 ifdef DEBUG
   $(info Compiling DEBUG version of binaries)
   override CFLAGS += -pg -ggdb3 -O0 $(CFLAGS_OPT)

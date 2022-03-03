@@ -59,7 +59,7 @@ double compute_weight(afl_state_t *afl, struct queue_entry *q,
 
   }
 
-  if (afl->ncd_based_queue) {
+  if (likely(afl->ncd_based_queue)) {
     weight *= q->rarity / avg_rarity;
   }
 
@@ -105,7 +105,7 @@ void create_alias_table(afl_state_t *afl) {
     double avg_rarity = 0.0;
     u32    active = 0;
 
-    if (afl->ncd_based_queue) {
+    if (likely(afl->ncd_based_queue)) {
 
       for (i = 0; i < afl->edge_entry_count; i++) {
         struct edge_entry *edge = &afl->edge_entries[i];
@@ -146,7 +146,7 @@ void create_alias_table(afl_state_t *afl) {
     avg_exec_us /= active;
     avg_bitmap_size /= active;
     avg_top_size /= active;
-    if (afl->ncd_based_queue) {
+    if (likely(afl->ncd_based_queue)) {
       avg_rarity /= active;
     }
 
@@ -336,7 +336,7 @@ void mark_as_redundant(afl_state_t *afl, struct queue_entry *q, u8 state) {
   sprintf(fn, "%s/queue/.state/redundant_edges/%s", afl->out_dir,
           strrchr(q->fname, '/') + 1);
 
-  if (afl->ncd_based_queue) {
+  if (likely(afl->ncd_based_queue)) {
     char *startPos = strrchr(q->fname, '/') + 1;
     char *updatedPos;
     if ((updatedPos = strstr(startPos, ",updated:"))) {
@@ -492,7 +492,7 @@ void add_to_queue(afl_state_t *afl, u8 *fname, u32 len, u8 passed_det, u8 hashfu
   q->testcase_buf = NULL;
   q->mother = afl->queue_cur;
 
-  if (afl->ncd_based_queue) {
+  if (likely(afl->ncd_based_queue)) {
     q->exec_cksum = cksum;
   }
 
@@ -687,7 +687,7 @@ void update_bitmap_score(afl_state_t *afl, struct queue_entry *q) {
         /* Looks like we're going to win. Decrease ref count for the
            previous winner, discard its afl->fsrv.trace_bits[] if necessary. */
 
-        if (!afl->ncd_based_queue && !--afl->top_rated[i]->tc_ref) {
+        if (unlikely(!afl->ncd_based_queue && !--afl->top_rated[i]->tc_ref)) {
 
           ck_free(afl->top_rated[i]->trace_mini);
           afl->top_rated[i]->trace_mini = 0;

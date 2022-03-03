@@ -808,29 +808,29 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
 
         bool match = false;
         for (int i = 0; i < this_edge->entry_count; i++) {
-          if (this_edge->entries[i]->input_hash == q_entry->input_hash) {
+          if (unlikely(this_edge->entries[i]->input_hash == q_entry->input_hash)) {
             match = true;
             break;
           }
         }
 
         // we already have this entry in the queue
-        if (match) {
+        if (unlikely(match)) {
 #ifdef NOISY
           printf("  Identical to existing queue entry, skipping\n");
 #endif
           continue;
         }
 
-        if (this_edge->entry_count < afl->ncd_entries_per_edge) {
+        if (unlikely(this_edge->entry_count < afl->ncd_entries_per_edge)) {
           // Let's record what execution we were on when discovering this edge
-          if (this_edge->entry_count == 0) {
+          if (unlikely(this_edge->entry_count == 0)) {
             this_edge->discovery_execs = afl->fsrv.total_execs;
           }
 
           // If there's already an entry for this edge then no point in storing
           // another copy of an input that is already in the queue
-          if (this_edge->entry_count > 0 && is_duplicate) {
+          if (likely(this_edge->entry_count > 0 && is_duplicate)) {
             continue;
           }
 #ifdef NOISY
@@ -918,7 +918,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
           continue;
         }
 
-        if (is_duplicate) {
+        if (unlikely(is_duplicate)) {
           // This queue_entry already exists for another edge
           continue;
         }
@@ -928,7 +928,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
         // let's see if any entries are duplicates and mark for eviction:
         for (u32 i = 0; i < this_edge->entry_count; i++) {
           struct queue_entry *entry = this_edge->entries[i];
-          if (entry->duplicates) {
+          if (unlikely(entry->duplicates)) {
             evictionCandidate = (int)i;
             break;
           }
@@ -940,9 +940,9 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
               this_edge->hit_count <= 10 ||
               (this_edge->hit_count <= 100 && this_edge->hit_count % 10 == 0) ||
               (this_edge->hit_count <= 1000 && this_edge->hit_count % 100 == 0) ||
-              (this_edge->hit_count > 10000 && this_edge->hit_count % 1000 == 0);
+              (this_edge->hit_count > 100000 && this_edge->hit_count % 1000 == 0);
 
-          if (!should_calc_NCD) {
+          if (likely(!should_calc_NCD)) {
             continue;
           }
 
@@ -957,12 +957,12 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
               q_entry,
               false
           );
-          if (evictionCandidate == -1) {
+          if (likely(evictionCandidate == -1)) {
             continue;
           }
         }
 
-        if (!q_entry->trace_mini)
+        if (unlikely(!q_entry->trace_mini))
           fill_trace_mini_and_compressed_len(afl, q_entry);
 
         // We have a real candidate to evict...
@@ -983,7 +983,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
         this_edge->replacement_count++;
         this_edge->normalised_compression_dist = calc_NCDm(afl, this_edge->entries, this_edge->entry_count);
 
-        if (evictee->favored) {
+        if (unlikely(evictee->favored)) {
           evictee->favored = false;
 
           for (u32 i = 0; i < afl->fsrv.map_size; i++) {
@@ -1006,7 +1006,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
                 }
               }
 
-              if (best_entry) {
+              if (likely(best_entry)) {
                 afl->top_rated[i] = NULL;
                 update_bitmap_score(afl, best_entry);
               } else {
@@ -1020,7 +1020,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
           }
         }
 
-        if (calibration_complete) {
+        if (unlikely(calibration_complete)) {
           evictee->cal_failed = cal_failed;
           evictee->exec_us = exec_us;
           evictee->exec_cksum = exec_cksum;
@@ -1369,7 +1369,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     new_bits = has_new_bits_unclassified(afl, afl->virgin_bits);
     interesting = new_bits;
 
-    if (afl->ncd_based_queue) {
+    if (likely(afl->ncd_based_queue)) {
     // Dump out some trace debug info
 //    if (is_interesting(afl)) {
       cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
@@ -1433,7 +1433,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
 #ifndef SIMPLE_FILES
 
-    if (!afl->ncd_based_queue) {
+    if (unlikely(!afl->ncd_based_queue)) {
       queue_fn = alloc_printf("%s/queue/id:%06u,cksum:%020llu,%s", afl->out_dir,
                               afl->queued_paths, cksum,
                               describe_op(afl, new_bits, new_partition >= 0,NAME_MAX - strlen("id:000000,")));
@@ -1446,7 +1446,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
 #endif                                                    /* ^!SIMPLE_FILES */
 
-    if (!afl->ncd_based_queue) {
+    if (unlikely(!afl->ncd_based_queue)) {
 #ifdef NOISY
       printf("Writing to NEW file\n");
 #endif
@@ -1493,7 +1493,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
     }
 
-    if ((!afl->ncd_based_queue && !afl->hashfuzz_enabled) || afl->hashfuzz_mimic_transformation) {
+    if (unlikely((!afl->ncd_based_queue && !afl->hashfuzz_enabled) || afl->hashfuzz_mimic_transformation)) {
 
       /* AFLFast schedule? update the new queue entry */
       if (cksum) {
@@ -1509,7 +1509,7 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
     }
 
-    if (!afl->ncd_based_queue) {
+    if (unlikely(!afl->ncd_based_queue)) {
       /* Try to calibrate inline; this also calls update_bitmap_score() when
          successful. */
 
