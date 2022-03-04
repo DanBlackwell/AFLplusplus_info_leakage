@@ -341,7 +341,7 @@ void mark_as_redundant(afl_state_t *afl, struct queue_entry *q, u8 state) {
     char *updatedPos;
     if ((updatedPos = strstr(startPos, ",updated:"))) {
       char *nextComma = strchr(updatedPos + 1, ',');
-      char buf[PATH_MAX];
+      char buf[PATH_MAX - 50];
       long endPos = updatedPos - (char *)startPos;
       memcpy(buf, startPos, endPos);
       buf[endPos] = 0;
