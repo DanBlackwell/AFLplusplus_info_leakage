@@ -430,8 +430,16 @@ u8 fuzz_one_original(afl_state_t *afl) {
        The odds of skipping stuff are higher for already-fuzzed inputs and
        lower for never-fuzzed entries. */
 
-    if (afl->queue_cycle > 1 &&
-        (afl->queue_cur->fuzz_level == 0 || afl->queue_cur->was_fuzzed)) {
+    bool unfuzzed = afl->queue_cur->fuzz_level == 0 || !afl->queue_cur->was_fuzzed;
+    if (likely(afl->ncd_based_queue)) {
+      struct queue_input_hash sought = { .hash = afl->queue_cur->input_hash };
+      struct queue_input_hash *found = hashmap_get(afl->queue_input_hashmap, &sought);
+      if (found) {
+        unfuzzed |= found->was_fuzzed;
+      }
+    }
+
+    if (afl->queue_cycle > 1 && unfuzzed) {
 
       if (likely(rand_below(afl, 100) < SKIP_NFAV_NEW_PROB)) { return 1; }
 
@@ -2889,6 +2897,14 @@ abandon_entry:
   if (!afl->stop_soon && !afl->queue_cur->cal_failed &&
       (afl->queue_cur->was_fuzzed == 0 || afl->queue_cur->fuzz_level == 0) &&
       !afl->queue_cur->disabled) {
+
+    if (likely(afl->ncd_based_queue)) {
+      struct queue_input_hash sought = { .hash = afl->queue_cur->input_hash };
+      struct queue_input_hash *found = hashmap_get(afl->queue_input_hashmap, &sought);
+      if (found) {
+        found->was_fuzzed = 1;
+      }
+    }
 
     if (!afl->queue_cur->was_fuzzed) {
 

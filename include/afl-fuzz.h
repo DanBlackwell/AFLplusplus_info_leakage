@@ -210,6 +210,7 @@ struct queue_input_hash {
   struct queue_entry **inputs;
   u32 inputs_count;
   u32 allocated_inputs;
+  u8 was_fuzzed;
 };
 
 struct edge_entry {
