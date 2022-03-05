@@ -804,6 +804,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
           // Let's record what execution we were on when discovering this edge
           if (unlikely(this_edge->entry_count == 0)) {
             this_edge->discovery_execs = afl->fsrv.total_execs;
+            afl->discovered_edge_entries++;
           }
 
           // If there's already an entry for this edge then no point in storing
@@ -872,6 +873,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
           }
 
           this_edge->entries[this_edge->entry_count] = new;
+          new->edge_entry = this_edge;
           this_edge->entry_count++;
 
           this_edge->normalised_compression_dist = calc_NCDm(afl, this_edge->entries, this_edge->entry_count);

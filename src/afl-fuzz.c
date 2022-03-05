@@ -2125,7 +2125,8 @@ int main(int argc, char **argv_orig, char **envp) {
     cull_queue(afl);
 
     if (unlikely((!afl->old_seed_selection &&
-                  runs_in_current_cycle > afl->queued_paths) ||
+//                  runs_in_current_cycle > afl->queued_paths) ||
+                  runs_in_current_cycle > afl->discovered_edge_entries) ||
                  (afl->old_seed_selection && !afl->queue_cur))) {
 
       if (unlikely((afl->last_sync_cycle < afl->queue_cycle ||

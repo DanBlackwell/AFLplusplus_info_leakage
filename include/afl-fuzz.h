@@ -203,6 +203,8 @@ struct queue_entry {
 
   struct queue_entry *mother;           /* queue entry this based on        */
 
+  struct edge_entry *edge_entry;        /* pointer to the edge_entry this belongs to */
+
 };
 
 struct queue_input_hash {
@@ -218,6 +220,8 @@ struct edge_entry {
   u16 edge_frequency;        /* The _ceiled_ number of times the edge is hit */
   u32 hit_count;            /* Number of generated inputs covering this edge */
   u64 discovery_execs;       /* number of execs before first entry was found */
+
+  u8 was_fuzzed;
 
   u8 entry_count;         /* Number of stored entries we have for this input */
   struct queue_entry *entries[8];      /* Stored queue_entries for this edge */
@@ -523,6 +527,8 @@ typedef struct afl_state {
 
   u8 schedule;                          /* Power schedule (default: EXPLORE)*/
   u8 havoc_max_mult;
+
+  u32 discovered_edge_entries;         /* Number of discovered edge_entries */
 
   u8 skip_deterministic,                /* Skip deterministic stages?       */
       use_splicing,                     /* Recombine input files?           */
