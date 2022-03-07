@@ -621,6 +621,7 @@ void move_queue_entry_to_correct_input_hash(afl_state_t *afl, struct queue_entry
     evictee->duplicates = 0;
     input_hash.inputs_count = 1;
     hashmap_set(afl->queue_input_hashmap, &input_hash);
+    found = hashmap_get(afl->queue_input_hashmap, &input_hash);
 
   } else {
     if (found->allocated_inputs == found->inputs_count) {
@@ -968,9 +969,9 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
 
         if (unlikely(evictee->favored)) {
           evictee->favored = false;
-          if (evictee->fuzz_level == 0 || !evictee->was_fuzzed) {
-            afl->pending_favored--;
-          }
+//          if (evictee->fuzz_level == 0 || !evictee->was_fuzzed) {
+//            afl->pending_favored--;
+//          }
 
           for (u32 i = 0; i < afl->fsrv.map_size; i++) {
             if (afl->top_rated[i] == evictee) {
@@ -1000,9 +1001,9 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
                 // first entry for that edge (as calibrate_case adds it immediately)
                 // This is no issue!
                 evictee->favored = true;
-                if (evictee->fuzz_level == 0 || !evictee->was_fuzzed) {
-                  afl->pending_favored++;
-                }
+//                if (evictee->fuzz_level == 0 || !evictee->was_fuzzed) {
+//                  afl->pending_favored++;
+//                }
               }
 
             }

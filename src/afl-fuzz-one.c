@@ -414,8 +414,22 @@ u8 fuzz_one_original(afl_state_t *afl) {
        possibly skip to them at the expense of already-fuzzed or non-favored
        cases. */
 
-    if (((afl->queue_cur->was_fuzzed > 0 || afl->queue_cur->fuzz_level > 0) ||
-         !afl->queue_cur->favored) &&
+    bool shouldnt_fuzz = afl->queue_cur->was_fuzzed > 0 ||
+        afl->queue_cur->fuzz_level > 0;
+
+    if (likely(afl->ncd_based_queue)) {
+      struct queue_input_hash input_hash = {
+          .hash = afl->queue_cur->input_hash
+      };
+      struct queue_input_hash *found = hashmap_get(
+          afl->queue_input_hashmap, &input_hash
+      );
+      if (found && found->was_fuzzed) {
+        shouldnt_fuzz = true;
+      }
+    }
+
+    if ((shouldnt_fuzz || !afl->queue_cur->favored) &&
         likely(rand_below(afl, 100) < SKIP_TO_NEW_PROB)) {
 
       return 1;
@@ -439,7 +453,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
       }
 
       if (afl->queue_cur->edge_entry &&
-          afl->queue_cur->edge_entry->was_fuzzed) {
+          !afl->queue_cur->edge_entry->was_fuzzed) {
         unfuzzed = true;
       }
     }

@@ -773,7 +773,18 @@ void cull_queue(afl_state_t *afl) {
         if (afl->top_rated[i]->fuzz_level == 0 ||
             !afl->top_rated[i]->was_fuzzed) {
 
-          ++afl->pending_favored;
+          // Insert the check for same hash being fuzzed already
+          if (likely(afl->ncd_based_queue)) {
+            struct queue_input_hash input_hash = { .hash = afl->top_rated[i]->input_hash };
+            struct queue_input_hash *found = hashmap_get(afl->queue_input_hashmap, &input_hash);
+
+            if (!found || !found->was_fuzzed) {
+              ++afl->pending_favored;
+            }
+
+          } else {
+            ++afl->pending_favored;
+          }
 
         }
 
