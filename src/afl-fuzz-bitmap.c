@@ -102,19 +102,21 @@ float calc_NCDm(afl_state_t *afl,
 
   for (int i = 0; i < queue_entries_count; i++) {
     struct queue_entry *entry = queue_entries[i];
+#ifdef PATH_DIVERSITY
     u32 len = (afl->fsrv.map_size >> 3);
     totalLen += len;
 
-#ifdef PATH_DIVERSITY
     if (unlikely(!entry->compressed_len || !entry->trace_mini)) {
       u8 *input_buf = entry->trace_mini;
 #else
+    u32 len = entry->len;
+    totalLen += len;
     if (unlikely(!entry->compressed_len || !entry->testcase_buf)) {
       u8 *input_buf = entry->testcase_buf;
 #endif
 
       if (!input_buf) {
-        FATAL("No trace_mini for input!");
+//        FATAL("No trace_mini for input!");
         printf("Oops - missing buffer for entry\n");
         input_buf = queue_testcase_get(afl, entry);
       }
@@ -130,7 +132,7 @@ float calc_NCDm(afl_state_t *afl,
     }
   }
 
-  if (prevLongest < totalLen) {
+  if (prevLongest <= totalLen) {
     u32 bitcnt = 0, val = totalLen;
     while (val > 1) { bitcnt++; val >>= 1; }
     prevLongest = 1 << (bitcnt + 2);  // round up to next power of 2
@@ -346,7 +348,7 @@ void write_bitmap(afl_state_t *afl) {
   snprintf(fname, PATH_MAX, "%s/fuzz_bitmap", afl->out_dir);
   fd = open(fname, O_WRONLY | O_CREAT | O_TRUNC, DEFAULT_PERMISSION);
 
-  if (fd < 0) { PFATAL("Unable to open '%s'", fname); }
+  if (fd < 0) { FATAL("Unable to open '%s'", fname); }
 
   ck_write(fd, afl->virgin_bits, afl->fsrv.map_size, fname);
 
@@ -609,6 +611,7 @@ void move_queue_entry_to_correct_input_hash(afl_state_t *afl, struct queue_entry
 
   // Then let's insert this evictee into its new hash
   input_hash.hash = new->input_hash;
+  evictee->input_hash = new->input_hash;
   found = hashmap_get(afl->queue_input_hashmap, &input_hash);
 
   if (!found) {
@@ -646,7 +649,7 @@ void swap_in_candidate(afl_state_t *afl, struct queue_entry *evictee, struct que
   memcpy(evictee->trace_mini, new->trace_mini, afl->fsrv.map_size >> 3);
 
   int fd = open(evictee->fname, O_WRONLY | O_TRUNC, DEFAULT_PERMISSION);
-  if (unlikely(fd < 0)) { PFATAL("Unable to open '%s'", evictee->fname); }
+  if (unlikely(fd < 0)) { FATAL("Unable to open '%s'", evictee->fname); }
   ck_write(fd, evictee->testcase_buf, evictee->len, evictee->fname);
   close(fd);
 
@@ -723,7 +726,7 @@ void fill_trace_mini_and_compressed_len(afl_state_t  *afl, struct queue_entry *q
   );
 #endif
   if (!q_entry->compressed_len) {
-    FATAL("compressedLen failed!");
+    FATAL("compressedLen failed! (input len: %d)", q_entry->len);
   }
 }
 

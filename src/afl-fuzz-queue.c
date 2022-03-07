@@ -1149,6 +1149,7 @@ inline u8 *queue_testcase_get(afl_state_t *afl, struct queue_entry *q) {
 
   if (unlikely(!afl->q_testcase_max_cache_size)) {
 
+    printf("OH NO\n");
     u8 *buf;
 
     if (unlikely(q == afl->queue_cur)) {

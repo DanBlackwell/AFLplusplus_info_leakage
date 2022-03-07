@@ -462,8 +462,11 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
     ACTF(
         "Fuzzing test case #%u (%u total, %llu uniq crashes found, "
-        "perf_score=%0.0f, exec_us=%llu, hits=%u, map=%u)...",
+        "favored=%u, pending_favs=%u, was_fuzzed=%u, perf_score=%0.0f, exec_us=%llu, hits=%u, "
+        "map=%u)...",
         afl->current_entry, afl->queued_paths, afl->unique_crashes,
+        afl->queue_cur->favored, afl->pending_favored,
+        afl->queue_cur->was_fuzzed,
         afl->queue_cur->perf_score, afl->queue_cur->exec_us,
         likely(afl->n_fuzz) ? afl->n_fuzz[afl->queue_cur->n_fuzz_entry] : 0,
         afl->queue_cur->bitmap_size);
@@ -2779,6 +2782,10 @@ havoc_stage:
 
     out_buf = afl_realloc(AFL_BUF_PARAM(out), len);
     if (unlikely(!out_buf)) { PFATAL("alloc"); }
+    if (likely(afl->ncd_based_queue)) {
+      in_buf = afl->queue_cur->testcase_buf;
+      len = afl->queue_cur->len;
+    }
     temp_len = len;
     memcpy(out_buf, in_buf, len);
 
@@ -2862,6 +2869,10 @@ retry_splicing:
        the last differing byte. Bail out if the difference is just a single
        byte or so. */
 
+    if (likely(afl->ncd_based_queue)) {
+      in_buf = afl->queue_cur->testcase_buf;
+      len = afl->queue_cur->len;
+    }
     locate_diffs(in_buf, new_buf, MIN(len, (s64)target->len), &f_diff, &l_diff);
 
     if (f_diff < 0 || l_diff < 2 || f_diff == l_diff) { goto retry_splicing; }
