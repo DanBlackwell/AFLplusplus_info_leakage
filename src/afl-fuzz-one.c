@@ -408,35 +408,53 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
   }
 
+  // some ncd_based entries are identical - if this one matches favoured entry
+  // then bite
+  bool matches_fav = afl->queue_cur->favored;
+  struct queue_input_hash *input_hash = NULL;
+
+  if (likely(afl->ncd_based_queue)) {
+    struct queue_input_hash sought = {
+        .hash = afl->queue_cur->input_hash
+    };
+    input_hash = hashmap_get(
+        afl->queue_input_hashmap, &sought
+    );
+
+    if (input_hash) {
+      for (u32 i = 0; i < input_hash->inputs_count; i++) {
+        if (input_hash->inputs[i]->favored) {
+          matches_fav = true;
+          break;
+        }
+      }
+    }
+  }
+
   if (likely(afl->pending_favored)) {
 
     /* If we have any favored, non-fuzzed new arrivals in the queue,
-       possibly skip to them at the expense of already-fuzzed or non-favored
-       cases. */
+         possibly skip to them at the expense of already-fuzzed or non-favored
+         cases. */
 
     bool shouldnt_fuzz = afl->queue_cur->was_fuzzed > 0 ||
-        afl->queue_cur->fuzz_level > 0;
+                         afl->queue_cur->fuzz_level > 0;
+
 
     if (likely(afl->ncd_based_queue)) {
-      struct queue_input_hash input_hash = {
-          .hash = afl->queue_cur->input_hash
-      };
-      struct queue_input_hash *found = hashmap_get(
-          afl->queue_input_hashmap, &input_hash
-      );
-      if (found && found->was_fuzzed) {
+      if (input_hash && input_hash->was_fuzzed) {
         shouldnt_fuzz = true;
       }
     }
 
-    if ((shouldnt_fuzz || !afl->queue_cur->favored) &&
+    if ((shouldnt_fuzz || !matches_fav) &&
         likely(rand_below(afl, 100) < SKIP_TO_NEW_PROB)) {
 
       return 1;
 
     }
 
-  } else if (!afl->non_instrumented_mode && !afl->queue_cur->favored &&
+  } else if (!afl->non_instrumented_mode && !matches_fav &&
 
              afl->queued_paths > 10) {
 
@@ -475,10 +493,10 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
     ACTF(
         "Fuzzing test case #%u (%u total, %llu uniq crashes found, "
-        "favored=%u, pending_favs=%u, was_fuzzed=%u, perf_score=%0.0f, exec_us=%llu, hits=%u, "
+        "favored=%u, matches_fav=%u, pending_favs=%u, was_fuzzed=%u, perf_score=%0.0f, exec_us=%llu, hits=%u, "
         "map=%u)...",
         afl->current_entry, afl->queued_paths, afl->unique_crashes,
-        afl->queue_cur->favored, afl->pending_favored,
+        afl->queue_cur->favored, matches_fav, afl->pending_favored,
         afl->queue_cur->was_fuzzed,
         afl->queue_cur->perf_score, afl->queue_cur->exec_us,
         likely(afl->n_fuzz) ? afl->n_fuzz[afl->queue_cur->n_fuzz_entry] : 0,

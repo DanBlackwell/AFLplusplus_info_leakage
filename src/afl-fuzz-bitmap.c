@@ -996,6 +996,10 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
               if (likely(best_entry)) {
                 afl->top_rated[i] = NULL;
                 update_bitmap_score(afl, best_entry);
+                if (!best_entry->was_fuzzed) {
+                  best_entry->fuzz_level = evictee->fuzz_level;
+                  best_entry->was_fuzzed = evictee->was_fuzzed;
+                }
               } else {
                 // This can happen occasionally if the entry that we're adding now is the
                 // first entry for that edge (as calibrate_case adds it immediately)
@@ -1357,8 +1361,6 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     interesting = new_bits;
 
     if (likely(afl->ncd_based_queue)) {
-    // Dump out some trace debug info
-//    if (is_interesting(afl)) {
       cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
 
       struct queue_entry new = {
