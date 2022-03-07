@@ -2124,10 +2124,16 @@ int main(int argc, char **argv_orig, char **envp) {
 
     cull_queue(afl);
 
-    if (unlikely((!afl->old_seed_selection &&
-//                  runs_in_current_cycle > afl->queued_paths) ||
-                  runs_in_current_cycle > afl->discovered_edge_entries) ||
-                 (afl->old_seed_selection && !afl->queue_cur))) {
+    if (unlikely(
+        (
+            !afl->old_seed_selection &&
+            (
+                (afl->ncd_based_queue && runs_in_current_cycle > afl->discovered_edge_entries) ||
+                (!afl->ncd_based_queue && runs_in_current_cycle > afl->queued_paths)
+            )
+        ) ||
+        (afl->old_seed_selection && !afl->queue_cur)
+    )) {
 
       if (unlikely((afl->last_sync_cycle < afl->queue_cycle ||
                     (!afl->queue_cycle && afl->afl_env.afl_import_first)) &&
@@ -2495,9 +2501,11 @@ stop_fuzzing:
   }
 
   ck_free(afl->n_fuzz);
-  ck_free(afl->edge_entries);
-  hashmap_clear(afl->queue_input_hashmap, false);
-  ck_free(afl->queue_input_hashmap);
+  if (afl->ncd_based_queue) {
+    ck_free(afl->edge_entries);
+    hashmap_clear(afl->queue_input_hashmap, false);
+    ck_free(afl->queue_input_hashmap);
+  }
 
   afl_fsrv_deinit(&afl->fsrv);
 

@@ -449,12 +449,11 @@ u8 fuzz_one_original(afl_state_t *afl) {
       struct queue_input_hash sought = { .hash = afl->queue_cur->input_hash };
       struct queue_input_hash *found = hashmap_get(afl->queue_input_hashmap, &sought);
       if (found) {
-        unfuzzed |= !found->was_fuzzed;
+        unfuzzed &= !found->was_fuzzed;
       }
 
-      if (afl->queue_cur->edge_entry &&
-          !afl->queue_cur->edge_entry->was_fuzzed) {
-        unfuzzed = true;
+      if (afl->queue_cur->edge_entry) {
+        unfuzzed &= !afl->queue_cur->edge_entry->was_fuzzed;
       }
     }
 
