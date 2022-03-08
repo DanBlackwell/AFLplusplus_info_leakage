@@ -832,11 +832,12 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
                        q_entry->len,
                        0,
                        this_edge->entry_count,
-                       q_entry->exec_cksum,
+                       0, // can't use this cksum as it's not classified counts
                        new_bits);
 
           struct queue_entry *new = afl->queue_top;
           new->testcase_buf = ck_alloc(new->len);
+          new->exec_cksum = 0;
           memcpy(new->testcase_buf, q_entry->testcase_buf, new->len);
           new->input_hash = q_entry->input_hash;
           new->trace_mini = ck_alloc(afl->fsrv.map_size >> 3);
@@ -956,6 +957,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
                    evictionCandidate, evictee->exec_cksum, q_entry->exec_cksum);
 #endif
         swap_in_candidate(afl, evictee, q_entry);
+        evictee->exec_cksum = 0;
         evictee->input_hash = q_entry->input_hash;
 //        if (evictee->input_hash != q_entry->input_hash)
 //          FATAL("evictee->input_hash %020llu != q_entry->input_hash %020llu", evictee->input_hash, q_entry->input_hash);
