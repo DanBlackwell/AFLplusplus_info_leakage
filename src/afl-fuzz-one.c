@@ -441,14 +441,27 @@ u8 fuzz_one_original(afl_state_t *afl) {
                          afl->queue_cur->fuzz_level > 0;
 
 
+    // Let's do 0.1% as the minimum unit rather than 1%
+    u16 skip_prob = SKIP_TO_NEW_PROB * 10;
+
     if (likely(afl->ncd_based_queue)) {
       if (input_hash && input_hash->was_fuzzed) {
         shouldnt_fuzz = true;
       }
+
+      // ratio of chaff inputs to favored
+      u32 fav_ratio = afl->queued_paths / afl->queued_favored;
+      if (fav_ratio < 20) {
+        // this should be fine
+      } else if (fav_ratio < 50) {
+        skip_prob = 995;
+      } else {
+        skip_prob = 999;
+      }
     }
 
     if ((shouldnt_fuzz || !matches_fav) &&
-        likely(rand_below(afl, 100) < SKIP_TO_NEW_PROB)) {
+        likely(rand_below(afl, 1000) < skip_prob)) {
 
       return 1;
 
