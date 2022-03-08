@@ -700,8 +700,13 @@ u8 *get_filename(afl_state_t *afl, u64 cksum, struct edge_entry *entry) {
 
 void fill_trace_mini_and_compressed_len(afl_state_t  *afl, struct queue_entry *q_entry) {
   u32 trace_map_len = (afl->fsrv.map_size >> 3);
+#ifdef PATH_DIVERSITY
   if (2 * trace_map_len > prevLongest) {
     u32 bitcnt = 0, val = trace_map_len;
+#else
+  if (2 * q_entry->len > prevLongest) {
+    u32 bitcnt = 0, val = q_entry->len;
+#endif
     while (val > 1) { bitcnt++; val >>= 1; }
     prevLongest = 1 << (bitcnt + 2);  // round up to next power of 2
 
