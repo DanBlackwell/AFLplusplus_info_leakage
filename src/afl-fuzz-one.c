@@ -483,7 +483,8 @@ u8 fuzz_one_original(afl_state_t *afl) {
         unfuzzed &= !found->was_fuzzed;
       }
 
-      if (afl->queue_cur->edge_entry) {
+      // Only slow it down if there are unfuzzed edges still
+      if (afl->pending_edge_entries && afl->queue_cur->edge_entry) {
         unfuzzed &= !afl->queue_cur->edge_entry->was_fuzzed;
       }
     }
@@ -2965,8 +2966,10 @@ abandon_entry:
         found->was_fuzzed = 1;
       }
 
-      if (afl->queue_cur->edge_entry)
+      if (afl->queue_cur->edge_entry && !afl->queue_cur->edge_entry->was_fuzzed) {
+        afl->pending_edge_entries--;
         afl->queue_cur->edge_entry->was_fuzzed = 1;
+      }
     }
 
     if (!afl->queue_cur->was_fuzzed) {

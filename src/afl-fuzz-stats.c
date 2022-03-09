@@ -250,6 +250,7 @@ void write_stats_file(afl_state_t *afl, u32 t_bytes, double bitmap_cvg,
           "cur_path          : %u\n"    /* Must match find_start_position() */
           "pending_favs      : %u\n"
           "pending_total     : %u\n"
+          "pending_edge_etrs : %u\n"
           "variable_paths    : %u\n"
           "stability         : %0.02f%%\n"
           "bitmap_cvg        : %0.02f%%\n"
@@ -285,9 +286,10 @@ void write_stats_file(afl_state_t *afl, u32 t_bytes, double bitmap_cvg,
           afl->last_avg_execs_saved, afl->queued_paths, afl->queued_favored,
           afl->queued_discovered, afl->queued_imported, afl->max_depth,
           afl->current_entry, afl->pending_favored, afl->pending_not_fuzzed,
-          afl->queued_variable, stability, bitmap_cvg, afl->unique_crashes,
-          afl->unique_hangs, afl->last_path_time / 1000,
-          afl->last_crash_time / 1000, afl->last_hang_time / 1000,
+          afl->pending_edge_entries, afl->queued_variable, stability,
+          bitmap_cvg, afl->unique_crashes, afl->unique_hangs,
+          afl->last_path_time / 1000, afl->last_crash_time / 1000,
+          afl->last_hang_time / 1000,
           afl->fsrv.total_execs - afl->last_crash_execs, afl->fsrv.exec_tmout,
           afl->slowest_exec_ms,
 #ifndef __HAIKU__

@@ -813,6 +813,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
           // Let's record what execution we were on when discovering this edge
           if (unlikely(this_edge->entry_count == 0)) {
             this_edge->discovery_execs = afl->fsrv.total_execs;
+            afl->pending_edge_entries++;
             afl->discovered_edge_entries++;
           }
 

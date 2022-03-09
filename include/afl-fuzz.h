@@ -529,6 +529,7 @@ typedef struct afl_state {
   u8 havoc_max_mult;
 
   u32 discovered_edge_entries;         /* Number of discovered edge_entries */
+  u32 pending_edge_entries;             /* number of unfuzzed edge_entries  */
 
   u8 skip_deterministic,                /* Skip deterministic stages?       */
       use_splicing,                     /* Recombine input files?           */
