@@ -781,13 +781,8 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
         u8 class = count_class_lookup8[mem8[i]];
         while ((class >> reps) > 1) reps++;
 
-//        if (reps < 0 || reps > 7)
-//          FATAL("reps for class %hhX is invalid: %d", class, reps);
-
         u32 edge_entries_pos = 8 * (edgeNum + i) + reps;
         struct edge_entry *this_edge = &afl->edge_entries[edge_entries_pos];
-//        if (this_edge->edge_num != (u8 *)current - afl->fsrv.trace_bits + i)
-//          FATAL("this_edge->edge_num (%u) != afl->fsrv.trace_bits - (u8 *)current (%lu) + i (%u)", this_edge->edge_num, (u8 *)current - afl->fsrv.trace_bits, i);
         this_edge->hit_count++;
 #ifdef NOISY
         printf("Hit edge: %hu, bucket: %hu\n", this_edge->edge_num, this_edge->edge_frequency);
@@ -930,8 +925,8 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
           bool should_calc_NCD =
               this_edge->hit_count <= 10 ||
               (this_edge->hit_count <= 100 && this_edge->hit_count % 10 == 0) ||
-              (this_edge->hit_count <= 1000 && this_edge->hit_count % 100 == 0) ||
-              (this_edge->hit_count > 100000 && this_edge->hit_count % 1000 == 0);
+              (this_edge->hit_count <= 10000 && this_edge->hit_count % 100 == 0) ||
+              (this_edge->hit_count % 1000 == 0);
 
           if (likely(!should_calc_NCD)) {
             continue;
@@ -965,10 +960,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
         swap_in_candidate(afl, evictee, q_entry);
         evictee->exec_cksum = 0;
         evictee->input_hash = q_entry->input_hash;
-//        if (evictee->input_hash != q_entry->input_hash)
-//          FATAL("evictee->input_hash %020llu != q_entry->input_hash %020llu", evictee->input_hash, q_entry->input_hash);
-//        if (evictee->input_hash != input_hash.hash)
-//          FATAL("evictee->input_hash %020llu != input_hash.hash %020llu", evictee->input_hash, input_hash.hash);
+
         found = hashmap_get(afl->queue_input_hashmap, &input_hash);
         is_duplicate = true;
 
@@ -977,9 +969,6 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
 
         if (unlikely(evictee->favored)) {
           evictee->favored = false;
-//          if (evictee->fuzz_level == 0 || !evictee->was_fuzzed) {
-//            afl->pending_favored--;
-//          }
 
           for (u32 i = 0; i < afl->fsrv.map_size; i++) {
             if (afl->top_rated[i] == evictee) {
@@ -1013,9 +1002,6 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
                 // first entry for that edge (as calibrate_case adds it immediately)
                 // This is no issue!
                 evictee->favored = true;
-//                if (evictee->fuzz_level == 0 || !evictee->was_fuzzed) {
-//                  afl->pending_favored++;
-//                }
               }
 
             }
@@ -1519,10 +1505,10 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
 
     }
 
-    if (likely(afl->q_testcase_max_cache_size)) {
-
-      queue_testcase_store_mem(afl, afl->queue_top, mem);
-
+    if (unlikely(!afl->ncd_based_queue)) {
+      if (likely(afl->q_testcase_max_cache_size)) {
+        queue_testcase_store_mem(afl, afl->queue_top, mem);
+      }
     }
 
     keeping = 1;

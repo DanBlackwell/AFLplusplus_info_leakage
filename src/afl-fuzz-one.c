@@ -421,7 +421,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
         afl->queue_input_hashmap, &sought
     );
 
-    if (input_hash) {
+    if (!matches_fav && input_hash) {
       for (u32 i = 0; i < input_hash->inputs_count; i++) {
         if (input_hash->inputs[i]->favored) {
           matches_fav = true;
@@ -477,15 +477,13 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
     bool unfuzzed = afl->queue_cur->fuzz_level == 0 || !afl->queue_cur->was_fuzzed;
     if (likely(afl->ncd_based_queue)) {
-      struct queue_input_hash sought = { .hash = afl->queue_cur->input_hash };
-      struct queue_input_hash *found = hashmap_get(afl->queue_input_hashmap, &sought);
-      if (found) {
-        unfuzzed &= !found->was_fuzzed;
-      }
-
       // Only slow it down if there are unfuzzed edges still
       if (afl->pending_edge_entries && afl->queue_cur->edge_entry) {
         unfuzzed &= !afl->queue_cur->edge_entry->was_fuzzed;
+      } else if (input_hash) {
+        // There are no pending edge_entries, if this input hasn't been fuzzed
+        // then let's prioritise this
+        unfuzzed |= !input_hash->was_fuzzed;
       }
     }
 
