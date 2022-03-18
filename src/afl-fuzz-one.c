@@ -479,17 +479,21 @@ u8 fuzz_one_original(afl_state_t *afl) {
     if (likely(afl->ncd_based_queue)) {
       // Only slow it down if there are unfuzzed edges still
       if (afl->pending_edge_entries && afl->queue_cur->edge_entry) {
-        unfuzzed &= !afl->queue_cur->edge_entry->was_fuzzed;
-      } else if (input_hash) {
-        // There are no pending edge_entries, if this input hasn't been fuzzed
-        // then let's prioritise this
-        unfuzzed |= !input_hash->was_fuzzed;
+        if (unfuzzed && afl->queue_cur->edge_entry->was_fuzzed) {
+          // edge already fuzzed
+          if (likely(rand_below(afl, 100) < 50)) { return 1; }
+        }
+//        unfuzzed &= !afl->queue_cur->edge_entry->was_fuzzed;
+//      } else if (input_hash) {
+//        // There are no pending edge_entries, if this input hasn't been fuzzed
+//        // then let's prioritise this
+//        unfuzzed |= !input_hash->was_fuzzed;
       }
     }
 
     if (afl->queue_cycle > 1 && unfuzzed) {
 
-      if (likely(rand_below(afl, 100) < SKIP_NFAV_NEW_PROB)) { return 1; }
+//      if (likely(rand_below(afl, 100) < )) { return 1; }
 
     } else {
 
@@ -505,10 +509,11 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
     ACTF(
         "Fuzzing test case #%u (%u total, %llu uniq crashes found, "
-        "favored=%u, matches_fav=%u, pending_favs=%u, was_fuzzed=%u, perf_score=%0.0f, exec_us=%llu, hits=%u, "
+        "favored=%u, matches_fav=%u, pending:{favs=%u, edges=%u, entries=%u}, was_fuzzed=%u, perf_score=%0.0f, exec_us=%llu, hits=%u, "
         "map=%u)...",
         afl->current_entry, afl->queued_paths, afl->unique_crashes,
         afl->queue_cur->favored, matches_fav, afl->pending_favored,
+        afl->pending_edge_entries, afl->pending_not_fuzzed,
         afl->queue_cur->was_fuzzed,
         afl->queue_cur->perf_score, afl->queue_cur->exec_us,
         likely(afl->n_fuzz) ? afl->n_fuzz[afl->queue_cur->n_fuzz_entry] : 0,
