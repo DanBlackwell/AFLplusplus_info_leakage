@@ -1355,6 +1355,9 @@ save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
     interesting = new_bits;
 
     if (likely(afl->ncd_based_queue)) {
+      if (new_bits)
+        afl->discovering_q_entries++;
+
       cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
 
       struct queue_entry new = {

@@ -530,6 +530,7 @@ typedef struct afl_state {
 
   u32 discovered_edge_entries;         /* Number of discovered edge_entries */
   u32 pending_edge_entries;             /* number of unfuzzed edge_entries  */
+  u32 discovering_q_entries;  /* num of queue_entry that found new coverage */
 
   u8 skip_deterministic,                /* Skip deterministic stages?       */
       use_splicing,                     /* Recombine input files?           */

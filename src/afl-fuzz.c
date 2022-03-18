@@ -2128,7 +2128,7 @@ int main(int argc, char **argv_orig, char **envp) {
         (
             !afl->old_seed_selection &&
             (
-                (afl->ncd_based_queue && runs_in_current_cycle > afl->discovered_edge_entries) ||
+                (afl->ncd_based_queue && runs_in_current_cycle > afl->discovering_q_entries) ||
                 (!afl->ncd_based_queue && runs_in_current_cycle > afl->queued_paths)
             )
         ) ||
