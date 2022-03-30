@@ -882,6 +882,10 @@ int main(int argc, char **argv_orig, char **envp) {
 
         }
 
+#ifdef LEVENSHTEIN_DIST
+        if (p != 2) { PFATAL("Can only use 2 entries for levenshtein dist"); }
+#endif
+
         afl->ncd_entries_per_edge = p;
 
         break;
@@ -2407,7 +2411,11 @@ stop_fuzzing:
 
   if (afl->ncd_based_queue) {
     printf("\n===============================================\n");
+#ifdef LEVENSHTEIN_DIST
+    printf("Dumping normalised levenshtein dist based edge stats\n");
+#else
     printf("Dumping NCD based edge stats\n");
+#endif
     u16 last_edge = 0;
     bool printed_edge_num = false;
     for (u32 i = 0; i < afl->edge_entry_count; i++) {
@@ -2433,11 +2441,19 @@ stop_fuzzing:
           if (unique) unique_checksums++;
         }
 
+#ifdef LEVENSHTEIN_DIST
+        printf("  hit_bucket: %05hu, entries: %d, unique_checksums: %d, norm_lev_dist: %0.05f, hits: %u, entry_replacements: %u\n",
+               entry->edge_frequency, entry->entry_count,
+               unique_checksums,
+               entry->normalised_levenshtein_dist, entry->hit_count,
+               entry->replacement_count);
+#else
         printf("  hit_bucket: %05hu, entries: %d, unique_checksums: %d, NCD: %0.05f, hits: %u, entry_replacements: %u\n",
                entry->edge_frequency, entry->entry_count,
                unique_checksums,
                entry->normalised_compression_dist, entry->hit_count,
                entry->replacement_count);
+#endif
       }
     }
     printf("===============================================\n");

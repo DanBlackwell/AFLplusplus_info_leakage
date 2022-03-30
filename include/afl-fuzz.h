@@ -138,6 +138,8 @@
   #define AFL_RAND_RETURN u32
 #endif
 
+#define LEVENSHTEIN_DIST
+
 extern s8  interesting_8[INTERESTING_8_LEN];
 extern s16 interesting_16[INTERESTING_8_LEN + INTERESTING_16_LEN];
 extern s32
@@ -229,6 +231,7 @@ struct edge_entry {
   u32 replacement_count;          /* Number of times an entry was swapped in */
 
   float normalised_compression_dist;    /* NCD for all current entries       */
+  float normalised_levenshtein_dist;    /* norm levenshtein (edit) dist      */
 
 };
 

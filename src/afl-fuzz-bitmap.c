@@ -38,60 +38,78 @@ static u8 *uncompressedData = NULL;
 static u8 *compressedData = NULL;
 //#define NOISY
 
-//float calc_NCD(afl_state_t *afl,
-//               struct queue_entry *a,
-//               struct queue_entry *b) {
-//
-//  if (!a->compressed_len || !b->testcase_buf) {
-//    u8 *input_buf = a->testcase_buf;
-//
-//    if (!input_buf) {
-//      printf("Oops - missing buffer for a\n");
-//      input_buf = queue_testcase_get(afl, a);
-//    }
-//
-//    a->compressed_len = LZ4_compress_default(input_buf,
-//                                             compressedData,
-//                                             (int)a->len,
-//                                             (int)maxCompressedLen);
-//  }
-//
-//  if (!b->compressed_len || !b->testcase_buf) {
-//    u8 *input_buf = b->testcase_buf;
-//
-//    if (!input_buf) {
-//      printf("Oops - missing buffer for b\n");
-//      input_buf = queue_testcase_get(afl, b);
-//    }
-//
-//    b->compressed_len = LZ4_compress_default(input_buf,
-//                                             compressedData,
-//                                             (int)b->len,
-//                                             (int)maxCompressedLen);
-//  }
-//
-//  memcpy(uncompressedData, a->testcase_buf, a->len);
-//  memcpy(uncompressedData + a->len, b->testcase_buf, b->len);
-//  s32 concatCompressedLen = LZ4_compress_default(uncompressedData,
-//                                                 compressedData,
-//                                                 (int)a->len + (int)b->len,
-//                                                 (int)maxCompressedLen);
-//  // printf("Ok, got compressed: C(A): %d, C(B): %d, C(AB): %d\n", a->compressed_len, b->compressed_len, concatCompressedLen);
-//
-//  u32 min = a->compressed_len < b->compressed_len ?
-//            a->compressed_len :
-//            b->compressed_len;
-//
-//  u32 max = a->compressed_len > b->compressed_len ?
-//            a->compressed_len :
-//            b->compressed_len;
-//
-//  // don't divide by 0...
-//  if (max == 0)
-//    return 0;
-//
-//  return ((float)concatCompressedLen - (float)min) / (float)max;
-//}
+float calc_normalised_levenshtein_dist(afl_state_t *afl,
+                                       struct queue_entry *queue_entry_1,
+                                       struct queue_entry *queue_entry_2) {
+
+  if (!queue_entry_2) { return 0.0f; }
+  if (!queue_entry_1->len || !queue_entry_2->len) { return 0.0f; }
+  if (queue_entry_1->len == queue_entry_2->len &&
+      !memcmp(queue_entry_1->testcase_buf, queue_entry_2->testcase_buf, queue_entry_1->len)) {
+    return 0.0f;
+  }
+
+  size_t len_1, len_2;
+  u8 *str_1, *str_2;
+  if (queue_entry_1->len > queue_entry_2->len) {
+    len_1 = queue_entry_1->len;
+    str_1 = queue_entry_1->testcase_buf;
+    len_2 = queue_entry_2->len;
+    str_2 = queue_entry_2->testcase_buf;
+  } else {
+    len_1 = queue_entry_2->len;
+    str_1 = queue_entry_2->testcase_buf;
+    len_2 = queue_entry_1->len;
+    str_2 = queue_entry_1->testcase_buf;
+  }
+
+  if (!len_1 || !len_2) { return 0; }
+
+  u32 matrix1[len_2]; // Previous row of distances
+  u32 matrix2[len_2]; // Current row of distances
+
+  u32 i, j;
+  for (i = 0; i < len_2; i++)
+    matrix1[i] = i;
+
+  // handle case where len = 1
+  matrix2[0] = str_1[0] == str_2[0] ? 0 : 1;
+
+  for (i = 0; i < len_1 - 1; i++) {
+    matrix2[0] = i + 1;
+    for (j = 0; j < len_2 - 1; j++) {
+      int cost = (str_1[i] == str_2[j]) ? 0 : 1;
+#define LEVMIN(a, b, c) ((a) < (b) ? ((a) < (c) ? (a) : (c)) : ((b) < (c) ? (b) : (c)))
+      matrix2[j+1] = LEVMIN(matrix2[j] + 1, matrix1[j+1] + 1, matrix1[j] + cost);
+    }
+
+    memcpy(matrix1, matrix2, sizeof(matrix2));
+  }
+
+  u32 edit_dist = matrix2[len_2 - 1];
+  float norm_dist = (float)(len_1 - edit_dist) / (float)len_1;
+  if (norm_dist > 1.0f || norm_dist < 0.0f) {
+    printf("str_1: [");
+    for (i = 0; i < len_1; i++) printf("%u, ", str_1[i]);
+    printf("\b\b]\n");
+
+    printf("str_2: [");
+    for (i = 0; i < len_2; i++) printf("%u, ", str_2[i]);
+    printf("\b\b]\n");
+
+    printf("matrix1: [");
+    for (i = 0; i < len_2; i++) printf("%u, ", matrix1[i]);
+    printf("\b\b]\n");
+
+    printf("matrix2: [");
+    for (i = 0; i < len_2; i++) printf("%u, ", matrix2[i]);
+    printf("\b\b]\n");
+
+    FATAL("got norm dist %f, from formula %u - %u / %u\n", norm_dist, len_1, edit_dist, len_1);
+  }
+
+  return (float)(len_1 - edit_dist) / (float)len_1;
+}
 
 float calc_NCDm(afl_state_t *afl,
                struct queue_entry *queue_entries[],
@@ -201,19 +219,33 @@ float calc_NCDm(afl_state_t *afl,
  * any others. If forced is true then just find best candidate regardless */
 
 int find_eviction_candidate(afl_state_t *afl,
+#ifdef  LEVENSHTEIN_DIST
+                            float existing_entries_lev_dist,
+#else
                             float existing_entries_NCD,
+#endif
                             struct queue_entry **existing_edge_entries,
                             int existing_entries_count,
                             struct queue_entry *new_entry,
                             bool forced) {
+#ifdef LEVENSHTEIN_DIST
+  if (existing_entries_count != 2) {
+    PFATAL("Need 2 entries only for levenshtein dist\n");
+  }
+#else
   if (existing_entries_count > 32) {
     PFATAL("Cannot handle more than 32 entries\n");
   }
+#endif
 
   struct queue_entry *all_entries[33];
 
   int evictionCandidate = -1;
-  float bestNCD = forced ? 0.0f : existing_entries_NCD;
+#ifdef LEVENSHTEIN_DIST
+  float best_dist = forced ? 0.0f : existing_entries_lev_dist;
+#else
+  float best_dist = forced ? 0.0f : existing_entries_NCD;
+#endif
 
   for (int i = 0; i < existing_entries_count; i++) {
     memcpy(all_entries, existing_edge_entries, sizeof(existing_edge_entries) * i);
@@ -222,85 +254,31 @@ int find_eviction_candidate(afl_state_t *afl,
            sizeof(existing_edge_entries) * (existing_entries_count - 1 - i));
     all_entries[existing_entries_count - 1] = new_entry;
 
-    float candidateNCD = calc_NCDm(afl, all_entries, existing_entries_count);
-    if (candidateNCD > bestNCD) {
+#ifdef LEVENSHTEIN_DIST
+    float candidate_dist = calc_normalised_levenshtein_dist(afl, existing_edge_entries[0], existing_edge_entries[1]);
+#else
+    float candidate_dist = calc_NCDm(afl, all_entries, existing_entries_count);
+#endif
+    if (candidate_dist > best_dist) {
       evictionCandidate = i;
-      bestNCD = candidateNCD;
+      best_dist = candidate_dist;
     }
   }
 
 #ifdef NOISY
   printf("  New best candidate NCD: %0.05f [was: %0.05f]\n", bestNCD, initialNCD);
 #endif
-  if (!forced && bestNCD <= existing_entries_NCD) {
+
+#ifdef LEVENSHTEIN_DIST
+  if (!forced && best_dist <= existing_entries_lev_dist) {
+#else
+  if (!forced && best_dist <= existing_entries_NCD) {
+#endif
     return -1;
   }
 
   return evictionCandidate;
 }
-
-//float calc_NCD_for_path_partitions(afl_state_t *afl,
-//                                   const struct path_partitions *pathPartitions) {
-//
-//  if (pathPartitions->foundPartitionsCount != 2) {
-//    PFATAL("I HAVEN'T IMPLEMENTED NCD FOR SETS (JUST PAIRS) YET (FOUND %d ENTRIES)!\n",
-//           pathPartitions->foundPartitionsCount);
-//  }
-//
-//#ifdef NOISY
-//  printf("a: %p, b_compressed_len: %u, b_buffer = %p, b_len: %u\n",
-//         pathPartitions->queue_entries[0],
-//         pathPartitions->queue_entries[1]->compressed_len,
-//         pathPartitions->queue_entries[1]->testcase_buf,
-//         pathPartitions->queue_entries[1]->len);
-//#endif
-//
-//  return calc_NCD(afl,
-//                  pathPartitions->queue_entries[0],
-//                  pathPartitions->queue_entries[1]);
-//}
-
-
-//struct queue_entry * isBetterEntry(afl_state_t *afl,
-//                                   struct path_partitions *pathPartitions,
-//                                   void *mem, u32 len,
-//                                   u32 compressedLen) {
-//  struct queue_entry *evictionCandidate = NULL;
-//  float maxNCD = -1;
-//  struct queue_entry new = {
-//      .testcase_buf = mem,
-//      .len = len,
-//      .compressed_len = compressedLen
-//  };
-//
-//#ifdef NOISY
-//  float originalNCD = calc_NCD_for_path_partitions(afl, pathPartitions);
-//#endif
-//
-//  for (int i = 0; i < pathPartitions->foundPartitionsCount; i++) {
-//    struct queue_entry *existing = pathPartitions->queue_entries[i];
-//    pathPartitions->queue_entries[i] = &new;
-//    float ncd = calc_NCD_for_path_partitions(afl, pathPartitions);
-//    pathPartitions->queue_entries[i] = existing;
-//
-//#ifdef  NOISY
-//    printf("Calculated NCD for %020llu for new input against pathPartitions->queue_entries[%d] and got %0.05f\n",
-//           pathPartitions->checksum, i, ncd);
-//#endif
-//
-//    if (ncd > pathPartitions->normalised_compression_dist && ncd > maxNCD) {
-//      evictionCandidate = existing;
-//      maxNCD = ncd;
-//#ifdef  NOISY
-//      printf("NCD %0.05f beats %0.05f [original was %0.05f]\n", ncd, pathPartitions->normalised_compression_dist, originalNCD);
-//      printf("new entry for %020llu beat pathPartitions->queue_entries[%d] NCD (was %0.05f, now: %0.05f)\n",
-//             pathPartitions->checksum, i, pathPartitions->normalised_compression_dist, ncd);
-//#endif
-//    }
-//  }
-//
-//  return evictionCandidate;
-//}
 
 bool printPathPartition(const void *item, void *udata) {
   const struct path_partitions *pp = item;
@@ -882,7 +860,14 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
           new->edge_entry = this_edge;
           this_edge->entry_count++;
 
+#ifdef LEVENSHTEIN_DIST
+          this_edge->normalised_levenshtein_dist =
+              calc_normalised_levenshtein_dist(afl,
+                                               this_edge->entries[0],
+                                               this_edge->entries[1]);
+#else
           this_edge->normalised_compression_dist = calc_NCDm(afl, this_edge->entries, this_edge->entry_count);
+#endif
           inserted = true;
 
           if (calibration_complete) {
@@ -937,7 +922,11 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
 
           evictionCandidate = find_eviction_candidate(
               afl,
+#ifdef LEVENSHTEIN_DIST
+              this_edge->normalised_levenshtein_dist,
+#else
               this_edge->normalised_compression_dist,
+#endif
               this_edge->entries,
               this_edge->entry_count,
               q_entry,
@@ -965,7 +954,11 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
         is_duplicate = true;
 
         this_edge->replacement_count++;
+#ifdef LEVENSHTEIN_DIST
+        this_edge->normalised_levenshtein_dist = calc_normalised_levenshtein_dist(afl, this_edge->entries[0], this_edge->entries[1]);
+#else
         this_edge->normalised_compression_dist = calc_NCDm(afl, this_edge->entries, this_edge->entry_count);
+#endif
 
         if (unlikely(evictee->favored)) {
           evictee->favored = false;
