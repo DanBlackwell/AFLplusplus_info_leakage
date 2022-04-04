@@ -479,7 +479,8 @@ u8 fuzz_one_original(afl_state_t *afl) {
     if (likely(afl->ncd_based_queue)) {
       // Only slow it down if there are unfuzzed edges still
       if (afl->pending_edge_entries && afl->queue_cur->edge_entry) {
-        if (unfuzzed && afl->queue_cur->edge_entry->was_fuzzed) {
+        unfuzzed |= afl->queue_cur->edge_entry->was_fuzzed;
+        if (unfuzzed) {
           // edge already fuzzed
           if (likely(rand_below(afl, 100) < 50)) { return 1; }
         }
@@ -2967,12 +2968,20 @@ abandon_entry:
       struct queue_input_hash *found = hashmap_get(afl->queue_input_hashmap, &sought);
       if (found) {
         found->was_fuzzed = 1;
+
+        for (u32 i = 0; i < found->inputs_count; i++) {
+          found->inputs[i]->was_fuzzed = 1;
+          if (!found->inputs[i]->edge_entry->was_fuzzed) {
+            afl->pending_edge_entries--;
+            found->inputs[i]->edge_entry->was_fuzzed = 1;
+          }
+        }
       }
 
-      if (afl->queue_cur->edge_entry && !afl->queue_cur->edge_entry->was_fuzzed) {
-        afl->pending_edge_entries--;
-        afl->queue_cur->edge_entry->was_fuzzed = 1;
-      }
+//      if (afl->queue_cur->edge_entry && !afl->queue_cur->edge_entry->was_fuzzed) {
+//        afl->pending_edge_entries--;
+//        afl->queue_cur->edge_entry->was_fuzzed = 1;
+//      }
     }
 
     if (!afl->queue_cur->was_fuzzed) {

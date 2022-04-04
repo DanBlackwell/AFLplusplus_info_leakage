@@ -138,7 +138,7 @@
   #define AFL_RAND_RETURN u32
 #endif
 
-#define LEVENSHTEIN_DIST
+//#define LEVENSHTEIN_DIST
 
 extern s8  interesting_8[INTERESTING_8_LEN];
 extern s16 interesting_16[INTERESTING_8_LEN + INTERESTING_16_LEN];
