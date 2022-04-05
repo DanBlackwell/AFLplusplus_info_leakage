@@ -866,7 +866,11 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
                                                this_edge->entries[0],
                                                this_edge->entries[1]);
 #else
+  #ifdef SHORTEST_INPUT
+          // no need to update those stats
+  #else
           this_edge->normalised_compression_dist = calc_NCDm(afl, this_edge->entries, this_edge->entry_count);
+  #endif
 #endif
           inserted = true;
 
@@ -896,6 +900,7 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
 
         int evictionCandidate = -1;
 
+#ifndef SHORTEST_INPUT
         // let's see if any entries are duplicates and mark for eviction:
         for (u32 i = 0; i < this_edge->entry_count; i++) {
           struct queue_entry *entry = this_edge->entries[i];
@@ -904,7 +909,9 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
             break;
           }
         }
+#endif
 
+#ifndef SHORTEST_INPUT
         // We haven't found any duplicates to kick out, let's see if NCD wins
         if (evictionCandidate == -1) {
           bool should_calc_NCD =
@@ -937,11 +944,22 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
           }
         }
 
+#endif
+
         if (unlikely(!q_entry->trace_mini))
           fill_trace_mini_and_compressed_len(afl, q_entry);
 
+#ifdef SHORTEST_INPUT
+        if (q_entry->len >= this_edge->entries[0]->len) {
+          // boring
+          continue;
+        }
+        struct queue_entry *evictee = this_edge->entries[0];
+#else
         // We have a real candidate to evict...
         struct queue_entry *evictee = this_edge->entries[evictionCandidate];
+#endif
+
 #ifdef NOISY
         printf("  Will evict candidate at pos %d, w checksum %020llu in favour of current w checksum %020llu\n",
                    evictionCandidate, evictee->exec_cksum, q_entry->exec_cksum);
@@ -957,7 +975,11 @@ u8 save_to_edge_entries(afl_state_t *afl, struct queue_entry *q_entry, u8 new_bi
 #ifdef LEVENSHTEIN_DIST
         this_edge->normalised_levenshtein_dist = calc_normalised_levenshtein_dist(afl, this_edge->entries[0], this_edge->entries[1]);
 #else
+  #ifdef SHORTEST_INPUT
+        // do nothing
+  #else
         this_edge->normalised_compression_dist = calc_NCDm(afl, this_edge->entries, this_edge->entry_count);
+  #endif
 #endif
 
         if (unlikely(evictee->favored)) {

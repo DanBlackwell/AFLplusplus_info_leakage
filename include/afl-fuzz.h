@@ -139,6 +139,7 @@
 #endif
 
 //#define LEVENSHTEIN_DIST
+#define SHORTEST_INPUT
 
 extern s8  interesting_8[INTERESTING_8_LEN];
 extern s16 interesting_16[INTERESTING_8_LEN + INTERESTING_16_LEN];
