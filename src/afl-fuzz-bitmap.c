@@ -216,9 +216,11 @@ float calc_NCDm(afl_state_t *afl,
 
 // returns 1 if traces differ in coverage, 0 if they are the same
 u8 compare_trace_minis(afl_state_t *afl, u8 *trace1, u8 *trace2) {
-  u64 *t1 = (u64 *)trace1; u64 *t2 = (u64 *)trace2;
-  u64 *t1_end = (u64 *)(trace1 + (afl->fsrv.map_size >> 3));
-  while (t1 < t1_end) {
+  u64 *t1 = (u64 *)trace1; 
+  u64 *t2 = (u64 *)trace2;
+  u32 i = afl->fsrv.map_size >> 3;
+
+  while (i--) {
     if (*t1 != *t2) {
       return 1;
     }
@@ -231,10 +233,10 @@ u8 compare_trace_minis(afl_state_t *afl, u8 *trace1, u8 *trace2) {
 // Returns 1 if trace1 contains coverage not seen in trace2
 u8 trace_contains_new_coverage(afl_state_t *afl, u8 *trace1, u8 *trace2) {
   u64 *t1 = (u64 *)trace1;
-  u64 *t1_end = (u64 *)(trace1 + (afl->fsrv.map_size >> 3));
   u64 *t2 = (u64 *)trace2;
+  u32 i = afl->fsrv.map_size >> 3;
 
-  while (t1 < t1_end) {
+  while (i--) {
     if ((*t1 | *t2) != *t2) {
       return 1;
     }
@@ -245,12 +247,12 @@ u8 trace_contains_new_coverage(afl_state_t *afl, u8 *trace1, u8 *trace2) {
 }
 
 u32 count_minified_trace_bits(afl_state_t *afl, u8 *trace) {
-  u8 *t = (u8 *)trace;
-  u8 *t_end = trace + (afl->fsrv.map_size >> 3);
+  u64 *t = (u64 *)trace;
   u32 total = 0;
+  u32 i = afl->fsrv.map_size >> 3;
 
-  while (t < t_end) {
-    for (u8 i = 0; i < 8; i++)
+  while (i--) {
+    for (u8 i = 0; i < 64; i++)
       total += ((*t) >> i) & 1;
     t++;
   }
@@ -316,9 +318,10 @@ void set_NCDm_favored(afl_state_t *afl) {
     }
 
     u64 *discovered = (u64 *)selected_inputs_map;
-    u64 *end = (u64 *)(selected_inputs_map + (afl->fsrv.map_size >> 3));
     u64 *new_input_map = (u64 *)best_candidate->trace_mini;
-    while (discovered <= end) {
+    u32 i = afl->fsrv.map_size >> 3;
+
+    while (i--) {
       *discovered |= *new_input_map;
       new_input_map++;
       discovered++;
@@ -351,6 +354,10 @@ void set_NCDm_favored(afl_state_t *afl) {
     }
   }
   float favored_NCDm = calc_NCDm(afl, favs, fav_pos);
+
+  ck_free(selected_inputs);
+  ck_free(selected_inputs_map);
+  ck_free(all_discovered);
 
   printf("Managed to get an NCD maxed subset (with 100%% coverage) in %u entries with NCDm: %f (vs %u favored entries with NCDm: %f)\n",
          len, total_NCDm, afl->queued_favored, favored_NCDm);
