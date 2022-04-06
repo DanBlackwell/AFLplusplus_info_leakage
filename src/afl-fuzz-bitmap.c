@@ -214,6 +214,152 @@ float calc_NCDm(afl_state_t *afl,
          (float)maxSubsetCompressedLen;
 }
 
+// returns 1 if traces differ in coverage, 0 if they are the same
+u8 compare_trace_minis(afl_state_t *afl, u8 *trace1, u8 *trace2) {
+  u64 *t1 = (u64 *)trace1; u64 *t2 = (u64 *)trace2;
+  u64 *t1_end = (u64 *)(trace1 + (afl->fsrv.map_size >> 3));
+  while (t1 < t1_end) {
+    if (*t1 != *t2) {
+      return 1;
+    }
+    t1++; t2++;
+  }
+
+  return 0;
+}
+
+// Returns 1 if trace1 contains coverage not seen in trace2
+u8 trace_contains_new_coverage(afl_state_t *afl, u8 *trace1, u8 *trace2) {
+  u64 *t1 = (u64 *)trace1;
+  u64 *t1_end = (u64 *)(trace1 + (afl->fsrv.map_size >> 3));
+  u64 *t2 = (u64 *)trace2;
+
+  while (t1 < t1_end) {
+    if ((*t1 | *t2) != *t2) {
+      return 1;
+    }
+    t1++; t2++;
+  }
+
+  return 0;
+}
+
+u32 count_minified_trace_bits(afl_state_t *afl, u8 *trace) {
+  u8 *t = (u8 *)trace;
+  u8 *t_end = trace + (afl->fsrv.map_size >> 3);
+  u32 total = 0;
+
+  while (t < t_end) {
+    for (u8 i = 0; i < 8; i++)
+      total += ((*t) >> i) & 1;
+    t++;
+  }
+
+  return total;
+}
+
+void set_NCDm_favored(afl_state_t *afl) {
+  u32 alloced = 100;
+  struct queue_entry **selected_inputs = ck_alloc(alloced * sizeof(struct queue_entry *));
+  u32 len = 0;
+
+  for (u32 i = 0; i < afl->queued_paths; i++)
+    afl->queue_buf[i]->ncdm_favored = false;
+
+  u32 discovered_edges = count_non_255_bytes(afl, afl->virgin_bits);
+  u8 *inverted = ck_alloc(afl->fsrv.map_size);
+  for (u32 i = 0; i < afl->fsrv.map_size; i++) {
+    inverted[i] = ~afl->virgin_bits[i];
+  }
+  u8 *all_discovered = ck_alloc(afl->fsrv.map_size >> 3);
+  minimize_bits(afl, all_discovered, inverted);
+  ck_free(inverted);
+
+  u8 *selected_inputs_map = ck_alloc(afl->fsrv.map_size >> 3);
+
+  float total_NCDm;
+
+  while (compare_trace_minis(afl, all_discovered, selected_inputs_map)) {
+    u32 shortest = UINT32_MAX;
+    float best_NCDm = 0.0;
+    struct queue_entry *best_candidate = NULL;
+    bool found_cov = false;
+
+    for (u32 i = 0; i < afl->queued_paths; i++) {
+      struct queue_entry *q = afl->queue_buf[i];
+
+      if (!trace_contains_new_coverage(afl, q->trace_mini, selected_inputs_map)) {
+        // Adding this entry won't improve coverage so ignore it
+        continue;
+      }
+      found_cov = true;
+
+      if (len == 0) {
+        if (q->compressed_len < shortest) {
+          best_candidate = q;
+          shortest = q->compressed_len;
+        }
+        continue;
+      }
+
+      selected_inputs[len] = q;
+      float ncdm = calc_NCDm(afl, selected_inputs, (int)(len + 1));
+      if (ncdm > best_NCDm) {
+        best_candidate = q;
+        best_NCDm = ncdm;
+      }
+    }
+
+    if (!found_cov) {
+      FATAL("failed to find an entry providing new coverage???? got to %u edges, expected: %u edges",
+            count_minified_trace_bits(afl, selected_inputs_map), count_minified_trace_bits(afl, all_discovered));
+    }
+
+    u64 *discovered = (u64 *)selected_inputs_map;
+    u64 *end = (u64 *)(selected_inputs_map + (afl->fsrv.map_size >> 3));
+    u64 *new_input_map = (u64 *)best_candidate->trace_mini;
+    while (discovered <= end) {
+      *discovered |= *new_input_map;
+      new_input_map++;
+      discovered++;
+    }
+
+    selected_inputs[len] = best_candidate;
+    len++;
+    best_candidate->ncdm_favored = true;
+    total_NCDm = best_NCDm;
+    if (len + 1 > alloced) {
+      alloced *= 2;
+      selected_inputs = ck_realloc(selected_inputs, alloced * sizeof(u8*));
+    }
+
+  }
+
+  char favs_buf[8192]; int fav_buf_pos = 0;
+  fav_buf_pos = sprintf(favs_buf, "favs: [");
+  char ncd_buf[8192]; int ncd_buf_pos = 0;
+  ncd_buf_pos = sprintf(ncd_buf, "NCDm_favs: [");
+
+  struct queue_entry *favs[1024]; u32 fav_pos = 0;
+  for (u32 i = 0; i < afl->queued_paths; i++) {
+    if (afl->queue_buf[i]->favored) {
+      favs[fav_pos++] = afl->queue_buf[i];
+      fav_buf_pos += sprintf(favs_buf + fav_buf_pos, "%u, ", i);
+    }
+    if (afl->queue_buf[i]->ncdm_favored) {
+      ncd_buf_pos += sprintf(ncd_buf + ncd_buf_pos, "%u, ", i);
+    }
+  }
+  float favored_NCDm = calc_NCDm(afl, favs, fav_pos);
+
+  printf("Managed to get an NCD maxed subset (with 100%% coverage) in %u entries with NCDm: %f (vs %u favored entries with NCDm: %f)\n",
+         len, total_NCDm, afl->queued_favored, favored_NCDm);
+  sprintf(favs_buf + fav_buf_pos, "\b\b]\n");
+  sprintf(ncd_buf + ncd_buf_pos, "\b\b]\n");
+  printf("%s", favs_buf);
+  printf("%s", ncd_buf);
+}
+
 /* Returns the index of the existing candidate that when replaced give the
  * largest NCD. If forced is false, then return -1 if the new_entry cannot beat
  * any others. If forced is true then just find best candidate regardless */
@@ -1311,7 +1457,6 @@ s8 check_if_new_partition(u64 checksum, u8 partition) {
 
 u8 __attribute__((hot))
 save_if_interesting(afl_state_t *afl, void *mem, u32 len, u8 fault) {
-
   if (unlikely(len == 0)) { return 0; }
 
   u8 *queue_fn = "";

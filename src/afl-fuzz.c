@@ -2151,6 +2151,8 @@ int main(int argc, char **argv_orig, char **envp) {
       runs_in_current_cycle = (u32)-1;
       afl->cur_skipped_paths = 0;
 
+      set_NCDm_favored(afl);
+
       if (unlikely(afl->old_seed_selection)) {
 
         afl->current_entry = 0;

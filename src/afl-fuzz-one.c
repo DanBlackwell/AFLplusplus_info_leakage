@@ -423,7 +423,7 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
     if (!matches_fav && input_hash) {
       for (u32 i = 0; i < input_hash->inputs_count; i++) {
-        if (input_hash->inputs[i]->favored) {
+        if (input_hash->inputs[i]->favored || input_hash->inputs[i]->ncdm_favored) {
           matches_fav = true;
           break;
         }
