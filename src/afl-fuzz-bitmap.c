@@ -218,7 +218,7 @@ float calc_NCDm(afl_state_t *afl,
 u8 compare_trace_minis(afl_state_t *afl, u8 *trace1, u8 *trace2) {
   u64 *t1 = (u64 *)trace1; 
   u64 *t2 = (u64 *)trace2;
-  u32 i = afl->fsrv.map_size >> 3;
+  u32 i = afl->fsrv.map_size >> 6;
 
   while (i--) {
     if (*t1 != *t2) {
@@ -234,7 +234,7 @@ u8 compare_trace_minis(afl_state_t *afl, u8 *trace1, u8 *trace2) {
 u8 trace_contains_new_coverage(afl_state_t *afl, u8 *trace1, u8 *trace2) {
   u64 *t1 = (u64 *)trace1;
   u64 *t2 = (u64 *)trace2;
-  u32 i = afl->fsrv.map_size >> 3;
+  u32 i = afl->fsrv.map_size >> 6;
 
   while (i--) {
     if ((*t1 | *t2) != *t2) {
@@ -249,7 +249,7 @@ u8 trace_contains_new_coverage(afl_state_t *afl, u8 *trace1, u8 *trace2) {
 u32 count_minified_trace_bits(afl_state_t *afl, u8 *trace) {
   u64 *t = (u64 *)trace;
   u32 total = 0;
-  u32 i = afl->fsrv.map_size >> 3;
+  u32 i = afl->fsrv.map_size >> 6;
 
   while (i--) {
     for (u8 i = 0; i < 64; i++)
@@ -313,13 +313,15 @@ void set_NCDm_favored(afl_state_t *afl) {
     }
 
     if (!found_cov) {
-      FATAL("failed to find an entry providing new coverage???? got to %u edges, expected: %u edges",
-            count_minified_trace_bits(afl, selected_inputs_map), count_minified_trace_bits(afl, all_discovered));
+      printf("Just about to bail, map_size: %u (>> 3 = %u)\n", afl->fsrv.map_size, afl->fsrv.map_size >> 3);
+      fflush(stdout);
+      FATAL("failed to find an entry providing new coverage???? got to %u edges, expected: %u edges (%u)",
+            count_minified_trace_bits(afl, selected_inputs_map), count_minified_trace_bits(afl, all_discovered), discovered_edges);
     }
 
     u64 *discovered = (u64 *)selected_inputs_map;
     u64 *new_input_map = (u64 *)best_candidate->trace_mini;
-    u32 i = afl->fsrv.map_size >> 3;
+    u32 i = afl->fsrv.map_size >> 6;
 
     while (i--) {
       *discovered |= *new_input_map;
