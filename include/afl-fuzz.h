@@ -188,6 +188,12 @@ struct queue_entry {
       weight;
 
   u8 *testcase_buf;                     /* The testcase buffer, if loaded.  */
+  u8 *public_input_start;             /* ptr to public part of testcase_buf */
+  u32 public_input_len;    /* Length (bytes) of public part of testcase_buf */
+  u8 *secret_input_start;             /* ptr to secret part of testcase_buf */
+  u32 secret_input_len;    /* Length (bytes) of secret part of testcase_buf */
+  u8 *public_output_buffer;           /* testcase output buffer, if loaded  */
+  u32 public_output_bufer_len;          /* len of public_output_buf         */
 
   u8 *            cmplog_colorinput;    /* the result buf of colorization   */
   struct tainted *taint;                /* Taint information from CmpLog    */

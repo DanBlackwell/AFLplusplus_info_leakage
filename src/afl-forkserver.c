@@ -360,7 +360,7 @@ static void report_error_and_exit(int error) {
 void afl_fsrv_start(afl_forkserver_t *fsrv, char **argv,
                     volatile u8 *stop_soon_p, u8 debug_child_output) {
 
-  int   st_pipe[2], ctl_pipe[2];
+  int   st_pipe[2], ctl_pipe[2], stdout_pipe[2];
   s32   status;
   s32   rlen;
   char *ignore_autodict = getenv("AFL_NO_AUTODICT");
@@ -400,6 +400,9 @@ void afl_fsrv_start(afl_forkserver_t *fsrv, char **argv,
   }
 
   if (pipe(st_pipe) || pipe(ctl_pipe)) { PFATAL("pipe() failed"); }
+  if (fsrv->leakage_hunting) {
+    if (pipe(stdout_pipe)) { PFATAL("pipe() stdout failed"); }
+  }
 
   fsrv->last_run_timed_out = 0;
   fsrv->fsrv_pid = fork();
@@ -466,9 +469,18 @@ void afl_fsrv_start(afl_forkserver_t *fsrv, char **argv,
 
     if (!(debug_child_output)) {
 
-      dup2(fsrv->dev_null_fd, 1);
-      dup2(fsrv->dev_null_fd, 2);
+      if (fsrv->leakage_hunting) {
+        dup2(stdout_pipe[1], 1);
+        dup2(fsrv->dev_null_fd, 2);
+      } else {
+        dup2(fsrv->dev_null_fd, 1);
+        dup2(fsrv->dev_null_fd, 2);
+      }
 
+    } else {
+      if (fsrv->leakage_hunting) {
+        FATAL("Cannot debug child output while hunting for leakage!");
+      }
     }
 
     if (!fsrv->use_stdin) {
@@ -491,6 +503,7 @@ void afl_fsrv_start(afl_forkserver_t *fsrv, char **argv,
     close(ctl_pipe[1]);
     close(st_pipe[0]);
     close(st_pipe[1]);
+    if (fsrv->leakage_hunting) { close(stdout_pipe[0]); }
 
     close(fsrv->out_dir_fd);
     close(fsrv->dev_null_fd);
@@ -599,6 +612,15 @@ void afl_fsrv_start(afl_forkserver_t *fsrv, char **argv,
 
   fsrv->fsrv_ctl_fd = ctl_pipe[1];
   fsrv->fsrv_st_fd = st_pipe[0];
+
+  if (fsrv->leakage_hunting) {
+    close(stdout_pipe[1]);
+    fsrv->fsrv_stdout_fd = stdout_pipe[0];
+
+    // Set the pipe non-blocking to prevent deadlocks
+    int flags = fcntl(fsrv->fsrv_stdout_fd, F_GETFL, 0);
+    fcntl(fsrv->fsrv_stdout_fd, F_SETFL, flags | O_NONBLOCK);
+  }
 
   /* Wait for the fork server to come up, but don't wait too long. */
 
@@ -1053,6 +1075,15 @@ void afl_fsrv_kill(afl_forkserver_t *fsrv) {
   fsrv->fsrv_pid = -1;
   fsrv->child_pid = -1;
 
+  if (fsrv->leakage_hunting) {
+    close(fsrv->fsrv_stdout_fd);
+    fclose(fsrv->stdout_file);
+
+    ck_free(fsrv->stdout_raw_buffer);
+    fsrv->stdout_raw_buffer_alloced = 0;
+    fsrv->stdout_raw_buffer_len = 0;
+  }
+
 }
 
 /* Get the map size from the target forkserver */
@@ -1172,6 +1203,27 @@ void afl_fsrv_write_to_testcase(afl_forkserver_t *fsrv, u8 *buf, size_t len) {
 
 }
 
+
+/* Utility function for finding last occurence of string in another string */
+char *findLast(const char *haystack, const char *needle) {
+  const char *needleEnd = needle + strlen(needle) - 1;
+  const char *needlePos = needleEnd;
+  const char *haystackPos = haystack + strlen(haystack);
+
+  while (haystackPos-- >= haystack) {
+    if (*needlePos == *haystackPos) {
+      if (needlePos == needle) {
+        return (char *)haystackPos;
+      }
+      needlePos--;
+    } else {
+      needlePos = needleEnd;
+    }
+  }
+
+  return NULL;
+}
+
 /* Execute target application, monitoring for timeouts. Return status
    information. The called program will update afl->fsrv->trace_bits. */
 
@@ -1288,6 +1340,39 @@ fsrv_run_result_t afl_fsrv_run_target(afl_forkserver_t *fsrv, u32 timeout,
   if (!WIFSTOPPED(fsrv->child_status)) { fsrv->child_pid = 0; }
 
   fsrv->total_execs++;
+
+  if (fsrv->leakage_hunting) {
+
+    if (!fsrv->stdout_file) {
+      fsrv->stdout_file = fdopen(fsrv->fsrv_stdout_fd, "rb");
+    }
+
+    if (fseek(fsrv->stdout_file, 0, SEEK_END)) {
+      FATAL("fseek failed to SEEK_END with error no: %d", ferror(fsrv->stdout_file));
+    }
+
+    size_t file_len = ftell(fsrv->stdout_file);
+
+    if (fseek(fsrv->stdout_file, 0, SEEK_SET)) {
+      FATAL("fseek failed to SEEK_SET with error no: %d", ferror(fsrv->stdout_file));
+    }
+
+    printf("Output len: %lu\n", file_len);
+
+    if (!fsrv->stdout_raw_buffer || file_len > fsrv->stdout_raw_buffer_alloced) {
+      u32 bitcnt = 0, val = file_len;
+      while (val > 1) { bitcnt++; val >>= 1; }
+      fsrv->stdout_raw_buffer_alloced = 1 << (bitcnt + 2);  // round up to next power of 2
+
+      fsrv->stdout_raw_buffer = ck_realloc(fsrv->stdout_raw_buffer, fsrv->stdout_raw_buffer_alloced);
+    }
+
+    fsrv->stdout_raw_buffer_len = fread(fsrv->stdout_raw_buffer, 1, file_len, fsrv->stdout_file);
+    if (fsrv->stdout_raw_buffer_len != file_len) {
+      FATAL("Expected to read %zu bytes but fread got %u", file_len, fsrv->stdout_raw_buffer_len);
+    }
+
+  }
 
   /* Any subsequent operations on fsrv->trace_bits must not be moved by the
      compiler below this point. Past this location, fsrv->trace_bits[]

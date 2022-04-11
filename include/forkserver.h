@@ -70,6 +70,13 @@ typedef struct afl_forkserver {
 
   u8 last_kill_signal;                  /* Signal that killed the child     */
 
+  bool leakage_hunting;      /* Fuzzer is searching for information leakage */
+  s32 fsrv_stdout_fd;                   /* fd for monitoring child's stdout */
+  FILE *stdout_file;                    /* FILE ptr for child's stdout      */
+  u8 *stdout_raw_buffer;            /* Buffer for storing raw stdout output */
+  u32 stdout_raw_buffer_len;          /* Length of raw stdout output stored */
+  u32 stdout_raw_buffer_alloced;   /* Allocated bytes for stdout_raw_buffer */
+
   bool use_shmem_fuzz;                  /* use shared mem for test cases    */
 
   bool support_shmem_fuzz;              /* set by afl-fuzz                  */

@@ -1709,6 +1709,8 @@ int main(int argc, char **argv_orig, char **envp) {
 
   }
 
+  afl->fsrv.leakage_hunting = true;
+
   afl->argv = use_argv;
   afl->fsrv.trace_bits =
       afl_shm_init(&afl->shm, afl->fsrv.map_size, afl->non_instrumented_mode);
