@@ -1014,10 +1014,13 @@ leakage_fuzz_stuff(afl_state_t *afl, u8 *public_in_buf, u32 public_len, u8 *secr
 
   /* This handles FAULT_ERROR for us: */
 
-  afl->queued_discovered += leakage_save_if_interesting(afl,
-                                                        combined_buf, combined_len,
-                                                        public_len, secret_len,
-                                                        fault);
+  afl->queued_discovered += leakage_save_if_interesting(
+      afl,
+      combined_buf, combined_len,
+      public_in_buf, public_len,
+      secret_in_buf, secret_len,
+      fault
+  );
 
   if (!(afl->stage_cur % afl->stats_update_freq) ||
       afl->stage_cur + 1 == afl->stage_max) {

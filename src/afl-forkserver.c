@@ -1342,35 +1342,34 @@ fsrv_run_result_t afl_fsrv_run_target(afl_forkserver_t *fsrv, u32 timeout,
   fsrv->total_execs++;
 
   if (fsrv->leakage_hunting) {
-
-    if (!fsrv->stdout_file) {
-      fsrv->stdout_file = fdopen(fsrv->fsrv_stdout_fd, "rb");
+    if (!fsrv->stdout_raw_buffer) {
+      fsrv->stdout_raw_buffer_alloced = 65536;
+      fsrv->stdout_raw_buffer = ck_alloc(fsrv->stdout_raw_buffer_alloced);
     }
 
-    if (fseek(fsrv->stdout_file, 0, SEEK_END)) {
-      FATAL("fseek failed to SEEK_END with error no: %d", ferror(fsrv->stdout_file));
-    }
+    int num_bytes = 0;
+    u32 len = 0;
+    do {
+      num_bytes = read(fsrv->fsrv_stdout_fd, fsrv->stdout_raw_buffer + len, 65536);
+      if (num_bytes == -1) {
+        printf("read failed with errno: %d\n", errno);
+        break;
+      }
 
-    size_t file_len = ftell(fsrv->stdout_file);
+      printf("Read %d bytes\n", num_bytes);
+      fflush(stdout);
+      len += num_bytes;
 
-    if (fseek(fsrv->stdout_file, 0, SEEK_SET)) {
-      FATAL("fseek failed to SEEK_SET with error no: %d", ferror(fsrv->stdout_file));
-    }
+      if (len >= fsrv->stdout_raw_buffer_alloced) {
+        printf("Reallocing fsrv->stdout_raw_buffer to %u bytes\n", len * 2);
+        fsrv->stdout_raw_buffer_alloced = len * 2;  // round up to next power of 2
+        fsrv->stdout_raw_buffer = ck_realloc(fsrv->stdout_raw_buffer, fsrv->stdout_raw_buffer_alloced);
+      }
+    } while (num_bytes == 65536);
 
-    printf("Output len: %lu\n", file_len);
+    fsrv->stdout_raw_buffer_len = len;
 
-    if (!fsrv->stdout_raw_buffer || file_len > fsrv->stdout_raw_buffer_alloced) {
-      u32 bitcnt = 0, val = file_len;
-      while (val > 1) { bitcnt++; val >>= 1; }
-      fsrv->stdout_raw_buffer_alloced = 1 << (bitcnt + 2);  // round up to next power of 2
-
-      fsrv->stdout_raw_buffer = ck_realloc(fsrv->stdout_raw_buffer, fsrv->stdout_raw_buffer_alloced);
-    }
-
-    fsrv->stdout_raw_buffer_len = fread(fsrv->stdout_raw_buffer, 1, file_len, fsrv->stdout_file);
-    if (fsrv->stdout_raw_buffer_len != file_len) {
-      FATAL("Expected to read %zu bytes but fread got %u", file_len, fsrv->stdout_raw_buffer_len);
-    }
+    printf("Output len: %lu\n", len);
 
   }
 

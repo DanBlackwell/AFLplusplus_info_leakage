@@ -45,8 +45,8 @@
 #include "sharedmem.h"
 #include "forkserver.h"
 #include "common.h"
-#include "hash.h"
 #include "base64.h"
+#include "hashmap.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -765,6 +765,8 @@ typedef struct afl_state {
   FILE *introspection_file;
   u32   bitsmap_size;
 #endif
+
+  struct hashmap *public_input_to_output_map;
 
 } afl_state_t;
 

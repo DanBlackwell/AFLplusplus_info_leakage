@@ -24,7 +24,6 @@
  */
 
 #include "afl-fuzz.h"
-#include "json.h"
 
 /* helper function for auto_extras qsort */
 static int compare_auto_extras_len(const void *ae1, const void *ae2) {
@@ -825,73 +824,4 @@ void destroy_extras(afl_state_t *afl) {
 
   afl_free(afl->extras);
 
-}
-
-#define PUBLIC_KEY "PUBLIC"
-#define SECRET_KEY "SECRET"
-
-/* Parses a testcase_buf to extract pointers and lengths for public and secret
- * segments of the testcase input. public_input and secret_input are malloced */
-
-void find_public_and_secret_inputs(const char *testcase_buf, u32 testcase_len,
-                                  uint8_t **public_input, uint32_t *public_len,
-                                  uint8_t **secret_input, uint32_t *secret_len) {
-
-    char *raw_public = malloc(testcase_len),
-         *raw_secret = malloc(testcase_len);
-
-    const struct json_attr_t json_attrs[] = {
-        {PUBLIC_KEY, t_string, .addr.string = raw_public, .len = testcase_len },
-        {SECRET_KEY, t_string, .addr.string = raw_secret, .len = testcase_len }
-    };
-
-    int err = json_read_object(testcase_buf, json_attrs, NULL);
-
-    if (err) {
-      printf("Failed to decode testcase_buf (json error: %s).\n  RAW: %s",
-             json_error_string(err), testcase_buf);
-      exit(1);
-    }
-
-    *public_len = Base64decode_len(raw_public);
-    *public_input = malloc(*public_len);
-    *public_len = Base64decode(*public_input, raw_public);
-    free(raw_public);
-
-    *secret_len = Base64decode_len(raw_secret);
-    *secret_input = malloc(*secret_len);
-    *secret_len = Base64decode(*secret_input, raw_secret);
-    free(raw_secret);
-}
-
-
-void create_buffer_from_public_and_secret_inputs(const uint8_t *public_input, u32 public_input_len,
-                                                 const uint8_t *secret_input, u32 secret_input_len,
-                                                 char **combined_buf, u32 *combined_buf_len) {
-
-  const char *json_out_template = "{\n  \"" PUBLIC_KEY "\": \"%s\",\n  \"" SECRET_KEY "\": \"%s\"\n}";
-
-  u32 expected_len = strlen(json_out_template) +
-                         Base64encode_len((int)public_input_len) +
-                         Base64encode_len((int)secret_input_len);
-
-  char *encoded_public = ck_alloc(expected_len);
-  Base64encode(encoded_public, public_input, (int)public_input_len);
-
-  char *encoded_secret = ck_alloc(expected_len);
-  Base64encode(encoded_secret, secret_input, (int)secret_input_len);
-
-  *combined_buf = ck_alloc(expected_len);
-  *combined_buf_len = snprintf(*combined_buf,
-                               expected_len,
-                               json_out_template,
-                               encoded_public,
-                               encoded_secret);
-
-  if (*combined_buf_len >= expected_len) {
-    FATAL("Would expect the output str to be shorter than %u characters, \nRAW: %s", expected_len, *combined_buf);
-  }
-
-  ck_free(encoded_public);
-  ck_free(encoded_secret);
 }

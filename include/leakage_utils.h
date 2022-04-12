@@ -19,7 +19,18 @@ void create_buffer_from_public_and_secret_inputs(
 
 u8 leakage_save_if_interesting(afl_state_t *afl,
                                void *combined_buf, u32 combined_len,
-                               u32 public_len, u32 secret_len,
+                               u8 *public_input_buf, u32 public_len,
+                               u8 *secret_input_buf, u32 secret_len,
                                u8 fault);
+
+struct input_output_hashes {
+  u64 public_input_hash;
+  u64 secret_input_hash;
+  u64 output_hash;
+};
+
+uint64_t input_hash(const void *input_str_w_len, uint64_t seed0, uint64_t seed1);
+
+int32_t input_compare(const void *a, const void *b, void *udata);
 
 #endif  // AFLPLUSPLUS_LEAKAGE_UTILS_H
