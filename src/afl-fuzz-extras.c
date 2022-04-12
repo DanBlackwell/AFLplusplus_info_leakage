@@ -25,7 +25,6 @@
 
 #include "afl-fuzz.h"
 #include "json.h"
-#include "base64.h"
 
 /* helper function for auto_extras qsort */
 static int compare_auto_extras_len(const void *ae1, const void *ae2) {

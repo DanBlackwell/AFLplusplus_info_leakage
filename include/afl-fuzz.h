@@ -46,6 +46,7 @@
 #include "forkserver.h"
 #include "common.h"
 #include "hash.h"
+#include "base64.h"
 
 #include <stdio.h>
 #include <unistd.h>

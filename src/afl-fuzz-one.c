@@ -363,6 +363,18 @@ static void locate_diffs(u8 *ptr1, u8 *ptr2, u32 len, s32 *first, s32 *last) {
 
 #endif                                                     /* !IGNORE_FINDS */
 
+struct leakage_test_input {
+  u8 *public_buf;
+  u32 public_len;
+  u8 *secret_buf;
+  u32 secret_len;
+};
+
+enum leakage_fuzz_phase {
+  LEAKAGE_FUZZ_MUTATE_FULL_INPUT,
+  LEAKAGE_FUZZ_MUTATE_SECRET
+};
+
 /* Take the current entry from the queue, fuzz it for a while. This
    function is a tad too long... returns 0 if fuzzed successfully, 1 if
    skipped or bailed out. */
@@ -380,6 +392,9 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
   u8  a_collect[MAX_AUTO_EXTRA];
   u32 a_len = 0;
+
+  struct leakage_test_input leak_input = {};
+  enum leakage_fuzz_phase leak_fuzz_phase = LEAKAGE_FUZZ_MUTATE_FULL_INPUT;
 
 #ifdef IGNORE_FINDS
 
@@ -575,6 +590,16 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
     }
 
+  }
+
+  if (afl->fsrv.leakage_hunting) {
+    leak_input.public_len = afl->queue_cur->public_input_len;
+    leak_input.public_buf = ck_alloc(leak_input.public_len);
+    memcpy(leak_input.public_buf, afl->queue_cur->public_input_start, leak_input.public_len);
+
+    leak_input.secret_len = afl->queue_cur->secret_input_len;
+    leak_input.secret_buf = ck_alloc(leak_input.secret_len);
+    memcpy(leak_input.secret_buf, afl->queue_cur->secret_input_start, leak_input.secret_len);
   }
 
   /* Skip right away if -d is given, if it has not been chosen sufficiently
@@ -2023,7 +2048,40 @@ havoc_stage:
 
   }
 
-  for (afl->stage_cur = 0; afl->stage_cur < afl->stage_max; ++afl->stage_cur) {
+  u32 leakage_stages = afl->fsrv.leakage_hunting ? afl->stage_max : 0;
+
+  for (afl->stage_cur = 0; afl->stage_cur < afl->stage_max + leakage_stages; ++afl->stage_cur) {
+
+    if (afl->stage_cur >= afl->stage_max) {
+      leak_fuzz_phase = LEAKAGE_FUZZ_MUTATE_SECRET;
+    }
+
+    bool mutate_public = false;
+
+    if (afl->fsrv.leakage_hunting) {
+      switch (leak_fuzz_phase) {
+        case LEAKAGE_FUZZ_MUTATE_FULL_INPUT: {
+          u32 combined_len = leak_input.public_len + leak_input.secret_len;
+          mutate_public =
+              leak_input.public_len <= rand_below(afl, combined_len);
+          break;
+        }
+        case LEAKAGE_FUZZ_MUTATE_SECRET:
+          mutate_public = true;
+          break;
+      }
+
+      orig_in = in_buf =
+          mutate_public ? leak_input.public_buf : leak_input.secret_buf;
+
+      len = mutate_public ? leak_input.public_len : leak_input.secret_len;
+      temp_len = len;
+
+      out_buf = afl_realloc(AFL_BUF_PARAM(out), len);
+      if (unlikely(!out_buf)) { PFATAL("alloc"); }
+
+      memcpy(out_buf, in_buf, len);
+    }
 
     u32 use_stacking = 1 << (1 + rand_below(afl, afl->havoc_stack_pow2));
 
@@ -2729,6 +2787,58 @@ havoc_stage:
 
     if (common_fuzz_stuff(afl, out_buf, temp_len)) { goto abandon_entry; }
 
+    if (afl->fsrv.leakage_hunting && !afl->fsrv.stdout_raw_buffer) {
+      FATAL("Leakage hunting enabled, but fsrv has no stdout_raw_buffer allocated");
+    }
+
+    if (afl->fsrv.stdout_raw_buffer) {
+      if (!afl->queue_cur->public_output_buffer) {
+        FATAL("Don't have the expected output for queued path %u", afl->current_entry);
+      }
+
+      if (!mutate_public) {
+        bool leaks =
+            afl->fsrv.stdout_raw_buffer_len != afl->queue_cur->public_output_bufer_len ||
+            memcmp(
+                afl->fsrv.stdout_raw_buffer,
+                afl->queue_cur->public_output_buffer,
+                afl->fsrv.stdout_raw_buffer_len
+            );
+
+        if (leaks) {
+
+          char *low1 = malloc(Base64encode_len(afl->queue_cur->public_input_len));
+          Base64encode(low1,
+                       afl->queue_cur->public_input_start,
+                       afl->queue_cur->public_input_len);
+          char *low2 = malloc(Base64encode_len(leak_input.public_len));
+          Base64encode(low2, leak_input.public_buf, leak_input.public_len);
+
+          char *secret1 = malloc(Base64encode_len(afl->queue_cur->secret_input_len));
+          Base64encode(secret1,
+                       afl->queue_cur->secret_input_start,
+                       afl->queue_cur->secret_input_len);
+          char *secret2 = malloc(Base64encode_len(temp_len));
+          Base64encode(secret2, out_buf, leak_input.secret_len);
+
+          char *out1 = malloc(Base64encode_len(afl->queue_cur->public_output_bufer_len));
+          Base64encode(out1,
+                       afl->queue_cur->public_output_buffer,
+                       afl->queue_cur->public_output_bufer_len);
+          char *out2 = malloc(Base64encode_len(afl->fsrv.stdout_raw_buffer_len));
+          Base64encode(out2,
+                       afl->fsrv.stdout_raw_buffer,
+                       afl->fsrv.stdout_raw_buffer_len);
+
+          FATAL("Leakage detected for hypertest pair: \n"
+                "{\n  LOW: %s,\n  HIGH: %s,\n  OUT: %s\n}"
+                "{\n  LOW: %s,\n  HIGH: %s,\n  OUT: %s\n}",
+                low1, secret1, out1, low2, secret2, out2);
+
+        }
+      }
+    }
+
     /* out_buf might have been mangled a bit, so let's restore it to its
        original size and shape. */
 
@@ -2781,6 +2891,10 @@ havoc_stage:
      code to mutate that blob. */
 
 retry_splicing:
+
+  if (afl->fsrv.leakage_hunting) {
+    FATAL("Started splicing (not implemented yet)");
+  }
 
   if (afl->use_splicing && splice_cycle++ < SPLICE_CYCLES &&
       afl->ready_for_splicing_count > 1 && afl->queue_cur->len >= 4) {
@@ -2848,6 +2962,11 @@ retry_splicing:
 
 /* we are through with this queue entry - for this iteration */
 abandon_entry:
+
+  if (afl->fsrv.leakage_hunting) {
+    ck_free(leak_input.public_buf);
+    ck_free(leak_input.secret_buf);
+  }
 
   afl->splicing_with = -1;
 
