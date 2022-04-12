@@ -25,6 +25,7 @@
  */
 
 #include "afl-fuzz.h"
+#include "leakage_utils.h"
 #include <sys/time.h>
 #include <signal.h>
 #include <limits.h>
@@ -964,3 +965,67 @@ common_fuzz_stuff(afl_state_t *afl, u8 *out_buf, u32 len) {
 
 }
 
+/* Write a modified test case, run program, process results. Handle
+   error conditions, returning 1 if it's time to bail out. This is
+   a helper function for fuzz_one(). */
+
+u8 __attribute__((hot))
+leakage_fuzz_stuff(afl_state_t *afl, u8 *public_in_buf, u32 public_len, u8 *secret_in_buf, u32 secret_len) {
+
+  u8 fault;
+
+  char *combined_buf;
+  u32 combined_len;
+  create_buffer_from_public_and_secret_inputs(public_in_buf, public_len,
+                                              secret_in_buf, secret_len,
+                                              &combined_buf, &combined_len);
+
+  write_to_testcase(afl, combined_buf, combined_len);
+
+  fault = fuzz_run_target(afl, &afl->fsrv, afl->fsrv.exec_tmout);
+
+  if (afl->stop_soon) { return 1; }
+
+  if (fault == FSRV_RUN_TMOUT) {
+
+    if (afl->subseq_tmouts++ > TMOUT_LIMIT) {
+
+      ++afl->cur_skipped_paths;
+      return 1;
+
+    }
+
+  } else {
+
+    afl->subseq_tmouts = 0;
+
+  }
+
+  /* Users can hit us with SIGUSR1 to request the current input
+     to be abandoned. */
+
+  if (afl->skip_requested) {
+
+    afl->skip_requested = 0;
+    ++afl->cur_skipped_paths;
+    return 1;
+
+  }
+
+  /* This handles FAULT_ERROR for us: */
+
+  afl->queued_discovered += leakage_save_if_interesting(afl,
+                                                        combined_buf, combined_len,
+                                                        public_len, secret_len,
+                                                        fault);
+
+  if (!(afl->stage_cur % afl->stats_update_freq) ||
+      afl->stage_cur + 1 == afl->stage_max) {
+
+    show_stats(afl);
+
+  }
+
+  return 0;
+
+}

@@ -837,30 +837,31 @@ void find_public_and_secret_inputs(const char *testcase_buf, u32 testcase_len,
                                   uint8_t **public_input, uint32_t *public_len,
                                   uint8_t **secret_input, uint32_t *secret_len) {
 
-  char *raw_public = malloc(testcase_len),
-       *raw_secret = malloc(testcase_len);
+    char *raw_public = malloc(testcase_len),
+         *raw_secret = malloc(testcase_len);
 
-  const struct json_attr_t json_attrs[] = {
-      {PUBLIC_KEY, t_string, .addr.string = raw_public},
-      {SECRET_KEY, t_string, .addr.string = raw_secret}
-  };
+    const struct json_attr_t json_attrs[] = {
+        {PUBLIC_KEY, t_string, .addr.string = raw_public, .len = testcase_len },
+        {SECRET_KEY, t_string, .addr.string = raw_secret, .len = testcase_len }
+    };
 
-  int err = json_read_object(testcase_buf, json_attrs, NULL);
+    int err = json_read_object(testcase_buf, json_attrs, NULL);
 
-  if (err) {
-    FATAL("Failed to decode testcase_buf (json error: %s).\n  RAW: %s",
-          json_error_string(err), testcase_buf);
-  }
+    if (err) {
+      printf("Failed to decode testcase_buf (json error: %s).\n  RAW: %s",
+             json_error_string(err), testcase_buf);
+      exit(1);
+    }
 
-  *public_len = Base64decode_len(raw_public);
-  *public_input = malloc(*public_len);
-  *public_len = Base64decode(raw_public, *public_input);
-  free(raw_public);
+    *public_len = Base64decode_len(raw_public);
+    *public_input = malloc(*public_len);
+    *public_len = Base64decode(*public_input, raw_public);
+    free(raw_public);
 
-  *secret_len = Base64decode_len(raw_secret);
-  *secret_input = malloc(*secret_len);
-  *secret_len = Base64decode(raw_secret, *secret_input);
-  free(raw_secret);
+    *secret_len = Base64decode_len(raw_secret);
+    *secret_input = malloc(*secret_len);
+    *secret_len = Base64decode(*secret_input, raw_secret);
+    free(raw_secret);
 }
 
 
@@ -868,7 +869,7 @@ void create_buffer_from_public_and_secret_inputs(const uint8_t *public_input, u3
                                                  const uint8_t *secret_input, u32 secret_input_len,
                                                  char **combined_buf, u32 *combined_buf_len) {
 
-  const char *json_out_template = "{\n  \"" PUBLIC_KEY "\": \"%s\",\n  \"" SECRET_KEY "\", \"%s\"\n}";
+  const char *json_out_template = "{\n  \"" PUBLIC_KEY "\": \"%s\",\n  \"" SECRET_KEY "\": \"%s\"\n}";
 
   u32 expected_len = strlen(json_out_template) +
                          Base64encode_len((int)public_input_len) +

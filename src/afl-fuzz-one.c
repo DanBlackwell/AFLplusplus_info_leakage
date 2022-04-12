@@ -2054,6 +2054,7 @@ havoc_stage:
 
     if (afl->stage_cur >= afl->stage_max) {
       leak_fuzz_phase = LEAKAGE_FUZZ_MUTATE_SECRET;
+      printf("Switched over to LEAKAGE_FUZZ_MUTATE_SECRET phase\n");
     }
 
     bool mutate_public = false;
@@ -2785,10 +2786,24 @@ havoc_stage:
 
     }
 
-    if (common_fuzz_stuff(afl, out_buf, temp_len)) { goto abandon_entry; }
-
-    if (afl->fsrv.leakage_hunting && !afl->fsrv.stdout_raw_buffer) {
-      FATAL("Leakage hunting enabled, but fsrv has no stdout_raw_buffer allocated");
+    if (!afl->fsrv.leakage_hunting) {
+      if (common_fuzz_stuff(afl, out_buf, temp_len)) { goto abandon_entry; }
+    } else {
+      if (mutate_public) {
+        if (leakage_fuzz_stuff(afl,
+                               out_buf, temp_len,
+                               leak_input.secret_buf, leak_input.secret_len)
+            ) {
+          goto abandon_entry;
+        }
+      } else {
+        if (leakage_fuzz_stuff(afl,
+                               leak_input.public_buf, leak_input.public_len,
+                               out_buf, temp_len)
+            ) {
+          goto abandon_entry;
+        }
+      }
     }
 
     if (afl->fsrv.stdout_raw_buffer) {
