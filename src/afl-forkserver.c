@@ -1347,7 +1347,7 @@ fsrv_run_result_t afl_fsrv_run_target(afl_forkserver_t *fsrv, u32 timeout,
       fsrv->stdout_raw_buffer = ck_alloc(fsrv->stdout_raw_buffer_alloced);
     }
 
-    int num_bytes = 0;
+    ssize_t num_bytes = 0;
     u32 len = 0;
     do {
       num_bytes = read(fsrv->fsrv_stdout_fd, fsrv->stdout_raw_buffer + len, 65536);
@@ -1356,7 +1356,6 @@ fsrv_run_result_t afl_fsrv_run_target(afl_forkserver_t *fsrv, u32 timeout,
         break;
       }
 
-      printf("Read %d bytes\n", num_bytes);
       fflush(stdout);
       len += num_bytes;
 
@@ -1369,7 +1368,7 @@ fsrv_run_result_t afl_fsrv_run_target(afl_forkserver_t *fsrv, u32 timeout,
 
     fsrv->stdout_raw_buffer_len = len;
 
-    printf("Output len: %lu\n", len);
+    printf("Output (%u): %s", len, (char *)fsrv->stdout_raw_buffer);
 
   }
 

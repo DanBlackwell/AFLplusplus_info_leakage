@@ -224,8 +224,8 @@ leakage_save_if_interesting(afl_state_t *afl,
   } else if (found->output_hash != output_hash) {
 
     u64 secret_input_hash = hash64(secret_input_buf, secret_len, HASH_CONST);
-    FATAL("Found a leaking hypertest: { L: %llu, H1: %llu, H2: %llu }\noutput1: %llu, output2: llu",
-          input_hash, found->secret_input_hash, secret_input_hash, output_hash);
+    FATAL("Found a leaking hypertest: { L: %llu, H1: %llu, H2: %llu }\noutput1: %llu, output2: %llu",
+          input_hash, found->secret_input_hash, secret_input_hash, output_hash, found->output_hash);
 
   }
 
