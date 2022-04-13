@@ -1368,7 +1368,7 @@ fsrv_run_result_t afl_fsrv_run_target(afl_forkserver_t *fsrv, u32 timeout,
 
     fsrv->stdout_raw_buffer_len = len;
 
-    printf("Output (%u): %s", len, (char *)fsrv->stdout_raw_buffer);
+//    printf("Output (%u): %.*s", len, len, (char *)fsrv->stdout_raw_buffer);
 
   }
 

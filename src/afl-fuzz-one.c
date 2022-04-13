@@ -2072,7 +2072,7 @@ havoc_stage:
           break;
         }
         case LEAKAGE_FUZZ_MUTATE_SECRET:
-          mutate_public = true;
+          mutate_public = false;
           break;
       }
 
@@ -2793,21 +2793,30 @@ havoc_stage:
     if (!afl->fsrv.leakage_hunting) {
       if (common_fuzz_stuff(afl, out_buf, temp_len)) { goto abandon_entry; }
     } else {
+      u8 *public_buf, *secret_buf;
+      u32 public_len,  secret_len;
+
       if (mutate_public) {
-        if (leakage_fuzz_stuff(afl,
-                               out_buf, temp_len,
-                               leak_input.secret_buf, leak_input.secret_len)
-            ) {
-          goto abandon_entry;
-        }
+        public_buf = out_buf;
+        public_len = temp_len;
+        secret_buf = leak_input.secret_buf;
+        secret_len = leak_input.secret_len;
       } else {
-        if (leakage_fuzz_stuff(afl,
-                               leak_input.public_buf, leak_input.public_len,
-                               out_buf, temp_len)
-            ) {
-          goto abandon_entry;
-        }
+        public_buf = leak_input.public_buf;
+        public_len = leak_input.public_len;
+        secret_buf = out_buf;
+        secret_len = temp_len;
       }
+
+      if (leakage_fuzz_stuff(afl,
+                             public_buf, public_len,
+                             secret_buf, secret_len)
+          ) {
+        goto abandon_entry;
+      }
+
+      printf("Tested (mutate_public: %d): { L: %.*s, H: %.*s, O: \"%.*s\" }\n",
+             mutate_public, public_len, public_buf, secret_len, secret_buf, afl->fsrv.stdout_raw_buffer_len, afl->fsrv.stdout_raw_buffer);
     }
 
     if (afl->fsrv.stdout_raw_buffer) {
