@@ -75,6 +75,39 @@ void create_buffer_from_public_and_secret_inputs(const uint8_t *public_input, u3
   ck_free(encoded_secret);
 }
 
+void public_input_for_queue_entry(struct queue_entry *q, char **public_input, u32 *public_len) {
+  if (!q->testcase_buf) {
+    FATAL("testcase_buf not loaded for queue_entry!");
+  }
+
+  if (!q->public_input_start || !q->secret_input_start) {
+    FATAL("public_input_start: %p, secret_input_start: %p", q->public_input_start, q->secret_input_start);
+  }
+
+  char tmp = q->public_input_start[q->public_input_len];
+  q->public_input_start[q->public_input_len] = 0;
+  *public_len = Base64decode_len((char *)q->public_input_start);
+  *public_input = ck_alloc(*public_len);
+  Base64decode(*public_input, (char *)q->public_input_start);
+  q->public_input_start[q->public_input_len] = tmp;
+}
+
+void secret_input_for_queue_entry(struct queue_entry *q, char **secret_input, u32 *secret_len) {
+  if (!q->testcase_buf) {
+    FATAL("testcase_buf not loaded for queue_entry!");
+  }
+
+  if (!q->public_input_start || !q->secret_input_start) {
+    FATAL("public_input_start: %p, secret_input_start: %p", q->public_input_start, q->secret_input_start);
+  }
+
+  char tmp = q->secret_input_start[q->secret_input_len];
+  q->secret_input_start[q->secret_input_len] = 0;
+  *secret_len = Base64decode_len((char *)q->secret_input_start);
+  *secret_input = ck_alloc(*secret_len);
+  Base64decode(*secret_input, (char *)q->secret_input_start);
+  q->secret_input_start[q->secret_input_len] = tmp;
+}
 
 // HASHMAP FUNCTIONS
 
@@ -217,6 +250,25 @@ leakage_save_if_interesting(afl_state_t *afl,
     sought.secret_input_hash = secret_input_hash;
     sought.output_hash = output_hash;
 
+    {
+      u32   len = afl->fsrv.stdout_raw_buffer_len;
+      char *tmp = malloc(len * 2);
+      u32   tmp_len = 0;
+      for (u32 i = 0; i < len; i++, tmp_len++) {
+        if (afl->fsrv.stdout_raw_buffer[i] == '\n') {
+          tmp[tmp_len++] = '\\';
+          tmp[tmp_len] = 'n';
+        } else {
+          tmp[tmp_len] = afl->fsrv.stdout_raw_buffer[i];
+        }
+      }
+
+      printf("Adding to io_map: { L: %.*s, H: %.*s, O: \"%.*s\" }\n",
+             public_len, public_input_buf, secret_len, secret_input_buf,
+             tmp_len, tmp);
+      free(tmp);
+    }
+
     hashmap_set(afl->public_input_to_output_map, &sought);
     printf("Added to io_map { L: %llu, H: %llu, OUT: %llu }\n",
            sought.public_input_hash, sought.secret_input_hash, sought.output_hash);
@@ -224,8 +276,11 @@ leakage_save_if_interesting(afl_state_t *afl,
   } else if (found->output_hash != output_hash) {
 
     u64 secret_input_hash = hash64(secret_input_buf, secret_len, HASH_CONST);
+    printf("Leaky input:\n%.*s\n", combined_len, (char *)combined_buf);
+    printf("output: %.*s\n", afl->fsrv.stdout_raw_buffer_len, afl->fsrv.stdout_raw_buffer);
     FATAL("Found a leaking hypertest: { L: %llu, H1: %llu, H2: %llu }\noutput1: %llu, output2: %llu",
           input_hash, found->secret_input_hash, secret_input_hash, output_hash, found->output_hash);
+
 
   }
 

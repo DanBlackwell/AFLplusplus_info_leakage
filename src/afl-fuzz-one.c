@@ -2058,7 +2058,7 @@ havoc_stage:
 
     if (afl->stage_cur >= afl->stage_max) {
       leak_fuzz_phase = LEAKAGE_FUZZ_MUTATE_SECRET;
-      printf("Switched over to LEAKAGE_FUZZ_MUTATE_SECRET phase\n");
+      printf("In LEAKAGE_FUZZ_MUTATE_SECRET phase\n");
     }
 
     bool mutate_public = false;
@@ -2815,8 +2815,21 @@ havoc_stage:
         goto abandon_entry;
       }
 
+      u32 len = afl->fsrv.stdout_raw_buffer_len;
+      char *tmp = malloc(len * 2);
+      u32 tmp_len = 0;
+      for (u32 i = 0; i < len; i++, tmp_len++) {
+        if (afl->fsrv.stdout_raw_buffer[i] == '\n') {
+          tmp[tmp_len++] = '\\';
+          tmp[tmp_len] = 'n';
+        } else {
+          tmp[tmp_len] = afl->fsrv.stdout_raw_buffer[i];
+        }
+      }
+
       printf("Tested (mutate_public: %d): { L: %.*s, H: %.*s, O: \"%.*s\" }\n",
-             mutate_public, public_len, public_buf, secret_len, secret_buf, afl->fsrv.stdout_raw_buffer_len, afl->fsrv.stdout_raw_buffer);
+             mutate_public, public_len, public_buf, secret_len, secret_buf, tmp_len, tmp);
+      free(tmp);
     }
 
     if (afl->fsrv.stdout_raw_buffer) {
@@ -2923,10 +2936,10 @@ havoc_stage:
 retry_splicing:
 
   if (afl->fsrv.leakage_hunting) {
-    FATAL("Started splicing (not implemented yet)");
+    printf("Entering splice phase\n");
   }
 
-  if (afl->use_splicing && splice_cycle++ < SPLICE_CYCLES &&
+  if (afl->use_splicing && splice_cycle++ < (afl->fsrv.leakage_hunting ? 2 : 1) * SPLICE_CYCLES &&
       afl->ready_for_splicing_count > 1 && afl->queue_cur->len >= 4) {
 
     struct queue_entry *target;
@@ -2937,10 +2950,20 @@ retry_splicing:
     /* First of all, if we've modified in_buf for havoc, let's clean that
        up... */
 
-    if (in_buf != orig_in) {
+    bool mutate_public = splice_cycle < SPLICE_CYCLES;
+    if (afl->fsrv.leakage_hunting) {
 
-      in_buf = orig_in;
-      len = afl->queue_cur->len;
+      in_buf = orig_in = mutate_public ? leak_input.public_buf : leak_input.secret_buf;
+      len = mutate_public ? leak_input.public_len : leak_input.secret_len;
+
+    } else {
+
+      if (in_buf != orig_in) {
+
+        in_buf = orig_in;
+        len = afl->queue_cur->len;
+
+      }
 
     }
 
@@ -2957,11 +2980,22 @@ retry_splicing:
     target = afl->queue_buf[tid];
     new_buf = queue_testcase_get(afl, target);
 
+    u32 target_len = target->len;
+    char *target_buf = new_buf;
+
+    if (afl->fsrv.leakage_hunting) {
+      if (mutate_public) {
+        public_input_for_queue_entry(target, &target_buf, &target_len);
+      } else {
+        secret_input_for_queue_entry(target, &target_buf, &target_len);
+      }
+    }
+
     /* Find a suitable splicing location, somewhere between the first and
        the last differing byte. Bail out if the difference is just a single
        byte or so. */
 
-    locate_diffs(in_buf, new_buf, MIN(len, (s64)target->len), &f_diff, &l_diff);
+    locate_diffs(in_buf, new_buf, MIN(len, (s64)target_len), &f_diff, &l_diff);
 
     if (f_diff < 0 || l_diff < 2 || f_diff == l_diff) { goto retry_splicing; }
 
@@ -2971,7 +3005,7 @@ retry_splicing:
 
     /* Do the thing. */
 
-    len = target->len;
+    len = target_len;
     afl->in_scratch_buf = afl_realloc(AFL_BUF_PARAM(in_scratch), len);
     memcpy(afl->in_scratch_buf, in_buf, split_at);
     memcpy(afl->in_scratch_buf + split_at, new_buf, len - split_at);
@@ -2981,6 +3015,20 @@ retry_splicing:
     out_buf = afl_realloc(AFL_BUF_PARAM(out), len);
     if (unlikely(!out_buf)) { PFATAL("alloc"); }
     memcpy(out_buf, in_buf, len);
+
+    if (afl->fsrv.leakage_hunting) {
+      if (mutate_public) {
+        leak_input.public_buf = ck_realloc(leak_input.public_buf, len);
+      } else {
+        leak_input.secret_buf = ck_realloc(leak_input.secret_buf, len);
+      }
+
+      printf("splice: mutate_public: %d, Created spliced entry: %*.s\n",
+             mutate_public,
+             mutate_public ? leak_input.public_len : leak_input.secret_len,
+             mutate_public ? leak_input.public_buf : leak_input.secret_buf);
+      ck_free(target_buf);
+    }
 
     goto custom_mutator_stage;
 

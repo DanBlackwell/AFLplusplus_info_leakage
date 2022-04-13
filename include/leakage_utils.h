@@ -17,6 +17,12 @@ void create_buffer_from_public_and_secret_inputs(
     char **combined_buf, uint32_t *combined_buf_len
 );
 
+// Fetch decoded (ie not base64) public input for queue entry [MALLOCs]
+void public_input_for_queue_entry(struct queue_entry *q, char **public_input, u32 *public_len);
+
+// Fetch decoded (ie not base64) secret queue entry [MALLOCs]
+void secret_input_for_queue_entry(struct queue_entry *q, char **secret_input, u32 *secret_len);
+
 u8 leakage_save_if_interesting(afl_state_t *afl,
                                void *combined_buf, u32 combined_len,
                                u8 *public_input_buf, u32 public_len,
