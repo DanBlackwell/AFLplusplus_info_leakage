@@ -1712,6 +1712,7 @@ int main(int argc, char **argv_orig, char **envp) {
 
   afl->fsrv.leakage_hunting = true;
   if (afl->fsrv.leakage_hunting) {
+    afl->disable_trim = true;
     afl->public_input_to_output_map = hashmap_new_with_allocator(
         ck_alloc, ck_realloc, ck_free,
         sizeof(struct input_output_hashes), 0, 0, 0,

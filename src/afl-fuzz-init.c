@@ -26,6 +26,7 @@
 #include "afl-fuzz.h"
 #include <limits.h>
 #include "cmplog.h"
+#include "leakage_utils.h"
 
 #ifdef HAVE_AFFINITY
 
@@ -890,6 +891,12 @@ void perform_dry_run(afl_state_t *afl) {
     close(fd);
 
     res = calibrate_case(afl, q, use_mem, 0, 1);
+
+    if (afl->fsrv.leakage_hunting) {
+      q->public_output_bufer_len = afl->fsrv.stdout_raw_buffer_len;
+      q->public_output_buffer = ck_alloc(q->public_output_bufer_len);
+      memcpy(q->public_output_buffer, afl->fsrv.stdout_raw_buffer, q->public_output_bufer_len);
+    }
 
     if (afl->stop_soon) { return; }
 

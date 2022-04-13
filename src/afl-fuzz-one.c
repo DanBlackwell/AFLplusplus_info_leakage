@@ -27,6 +27,7 @@
 #include <string.h>
 #include <limits.h>
 #include "cmplog.h"
+#include "leakage_utils.h"
 
 /* MOpt */
 
@@ -472,8 +473,21 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
   }
 
+
   orig_in = in_buf = queue_testcase_get(afl, afl->queue_cur);
   len = afl->queue_cur->len;
+
+  if (afl->fsrv.leakage_hunting) {
+    find_public_and_secret_inputs(afl->queue_cur->testcase_buf, afl->queue_cur->len,
+                                  &leak_input.public_buf, &leak_input.public_len,
+                                  &leak_input.secret_buf, &leak_input.secret_len);
+
+    printf("Public_input (%d): %.*s\n", leak_input.public_len, leak_input.public_len, leak_input.public_buf);
+    printf("Secret_input (%d): %.*s\n", leak_input.secret_len, leak_input.secret_len, leak_input.secret_buf);
+    printf("testcase_buf (%d): %.*s\n", afl->queue_cur->len, afl->queue_cur->len, afl->queue_cur->testcase_buf);
+    fflush(stdout);
+
+  }
 
   out_buf = afl_realloc(AFL_BUF_PARAM(out), len);
   if (unlikely(!out_buf)) { PFATAL("alloc"); }
@@ -590,16 +604,6 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
     }
 
-  }
-
-  if (afl->fsrv.leakage_hunting) {
-    leak_input.public_len = afl->queue_cur->public_input_len;
-    leak_input.public_buf = ck_alloc(leak_input.public_len);
-    memcpy(leak_input.public_buf, afl->queue_cur->public_input_start, leak_input.public_len);
-
-    leak_input.secret_len = afl->queue_cur->secret_input_len;
-    leak_input.secret_buf = ck_alloc(leak_input.secret_len);
-    memcpy(leak_input.secret_buf, afl->queue_cur->secret_input_start, leak_input.secret_len);
   }
 
   /* Skip right away if -d is given, if it has not been chosen sufficiently
