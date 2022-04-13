@@ -2719,6 +2719,8 @@ havoc_stage:
 
           } while (tid == afl->current_entry || afl->queue_buf[tid]->len < 4);
 
+          printf("WEIRD splice\n");
+
           /* Get the testcase for splicing. */
           struct queue_entry *target = afl->queue_buf[tid];
           u32                 new_len = target->len;
@@ -2935,12 +2937,12 @@ havoc_stage:
 
 retry_splicing:
 
-  if (afl->fsrv.leakage_hunting) {
-    printf("Entering splice phase\n");
-  }
-
   if (afl->use_splicing && splice_cycle++ < (afl->fsrv.leakage_hunting ? 2 : 1) * SPLICE_CYCLES &&
       afl->ready_for_splicing_count > 1 && afl->queue_cur->len >= 4) {
+
+    if (afl->fsrv.leakage_hunting) {
+      printf("Entering splice phase\n");
+    }
 
     struct queue_entry *target;
     u32                 tid, split_at;

@@ -979,6 +979,7 @@ leakage_fuzz_stuff(afl_state_t *afl, u8 *public_in_buf, u32 public_len, u8 *secr
   create_buffer_from_public_and_secret_inputs(public_in_buf, public_len,
                                               secret_in_buf, secret_len,
                                               &combined_buf, &combined_len);
+  printf("Combined: %.*s\n", combined_len, combined_buf);
 
   write_to_testcase(afl, combined_buf, combined_len);
 

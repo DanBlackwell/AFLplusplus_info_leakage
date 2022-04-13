@@ -43,6 +43,34 @@ void find_public_and_secret_inputs(const char *testcase_buf, u32 testcase_len,
   free(raw_secret);
 }
 
+void locate_public_and_secret_inputs(struct queue_entry *q) {
+  if (!q->testcase_buf) {
+    FATAL("testcase_buf is NULL");
+  }
+
+  const char *public = "\"PUBLIC\": \"";
+  q->public_input_start = strstr((char *)q->testcase_buf, public) + strlen(public);
+  for (u32 i = 0; i < q->len - (q->public_input_start - q->testcase_buf); i++) {
+    if (q->public_input_start[i] == '\"') {
+      q->public_input_len = i;
+      break;
+    }
+  }
+
+  const char *secret = "\"SECRET\": \"";
+  q->secret_input_start = strstr((char *)q->testcase_buf, secret) + strlen(secret);
+  for (u32 i = 0; i < q->len - (q->secret_input_start - q->testcase_buf); i++) {
+    if (q->secret_input_start[i] == '\"') {
+      q->secret_input_len = i;
+      break;
+    }
+  }
+
+  printf("Locating public and secret inputs in %.*s: secret_input: %.*s, public_input: %.*s\n",
+         q->len, q->testcase_buf, q->secret_input_len, q->secret_input_start,
+         q->public_input_len, q->public_input_start);
+
+}
 
 void create_buffer_from_public_and_secret_inputs(const uint8_t *public_input, u32 public_input_len,
                                                  const uint8_t *secret_input, u32 secret_input_len,
@@ -81,7 +109,7 @@ void public_input_for_queue_entry(struct queue_entry *q, char **public_input, u3
   }
 
   if (!q->public_input_start || !q->secret_input_start) {
-    FATAL("public_input_start: %p, secret_input_start: %p", q->public_input_start, q->secret_input_start);
+    locate_public_and_secret_inputs(q);
   }
 
   char tmp = q->public_input_start[q->public_input_len];
@@ -169,16 +197,7 @@ inline void leakage_queue_testcase_store_mem(afl_state_t *afl, struct queue_entr
 
   memcpy(q->testcase_buf, mem, len);
 
-  const char *public = "\"PUBLIC\": \"";
-  q->public_input_start = strstr(mem, public) + strlen(public);
-
-  const char *secret = "\"SECRET\": \"";
-  q->secret_input_start = strstr(mem, secret) + strlen(secret);
-
-  printf("Caching to MEM: secret_input starts at: %p, public at %p, in combined at %p\n",
-         q->secret_input_start, q->public_input_start,
-         q->testcase_buf);
-
+  locate_public_and_secret_inputs(q);
 
   /* Register testcase as cached */
   afl->q_testcase_cache[tid] = q;
@@ -278,7 +297,7 @@ leakage_save_if_interesting(afl_state_t *afl,
     u64 secret_input_hash = hash64(secret_input_buf, secret_len, HASH_CONST);
     printf("Leaky input:\n%.*s\n", combined_len, (char *)combined_buf);
     printf("output: %.*s\n", afl->fsrv.stdout_raw_buffer_len, afl->fsrv.stdout_raw_buffer);
-    FATAL("Found a leaking hypertest: { L: %llu, H1: %llu, H2: %llu }\noutput1: %llu, output2: %llu",
+    printf("Found a leaking hypertest: { L: %llu, H1: %llu, H2: %llu }\noutput1: %llu, output2: %llu",
           input_hash, found->secret_input_hash, secret_input_hash, output_hash, found->output_hash);
 
 
