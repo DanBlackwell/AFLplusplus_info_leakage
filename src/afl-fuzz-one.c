@@ -5528,6 +5528,7 @@ enum leakage_fuzz_phase {
   LEAKAGE_FUZZ_MUTATE_SECRET
 };
 
+struct leakage_test_input leak_input = {};
 u8 *raw_combined_scratch_buf = NULL;
 u8 *mutate_buf = NULL;
 u8 *leakage_scratch_buf = NULL;
@@ -5550,7 +5551,6 @@ u8 leakage_fuzz_one_original(afl_state_t *afl) {
   u8  a_collect[MAX_AUTO_EXTRA];
   u32 a_len = 0;
 
-  struct leakage_test_input leak_input = {};
   enum leakage_fuzz_phase leak_fuzz_phase = LEAKAGE_FUZZ_MUTATE_FULL_INPUT;
 
 #ifdef IGNORE_FINDS
@@ -5727,8 +5727,7 @@ u8 leakage_fuzz_one_original(afl_state_t *afl) {
   leak_input.mutation_seed_public_len = leak_input.orig_public_len;
   leak_input.mutation_seed_secret_len = leak_input.orig_secret_len;
   len = temp_len = leak_input.mutation_seed_public_len + leak_input.mutation_seed_secret_len;
-  leak_input.mutation_seed_combined_buf = ck_alloc(len);
-  leak_input.raw_combined_buf = leak_input.mutation_seed_combined_buf;
+  leak_input.mutation_seed_combined_buf = ck_realloc(leak_input.mutation_seed_combined_buf, len);
 
   memcpy(leak_input.mutation_seed_combined_buf,
          leak_input.orig_public_buf,
@@ -5737,6 +5736,10 @@ u8 leakage_fuzz_one_original(afl_state_t *afl) {
   memcpy(leak_input.mutation_seed_combined_buf + leak_input.mutation_seed_public_len,
          leak_input.orig_secret_buf,
          leak_input.mutation_seed_secret_len);
+
+  leak_input.raw_combined_buf_len = len;
+  leak_input.raw_combined_buf = ck_alloc(len);
+  memcpy(leak_input.raw_combined_buf, leak_input.mutation_seed_combined_buf, len);
 
   /*********************
    * PERFORMANCE SCORE *
@@ -8233,8 +8236,8 @@ retry_splicing:
   if (afl->use_splicing && splice_cycle++ < SPLICE_CYCLES &&
       afl->ready_for_splicing_count > 1 && afl->queue_cur->len >= 4) {
 
-    printf("should have spliced\n");
-    goto abandon_entry;
+    printf("REGULAR splice\n");
+//    goto abandon_entry;
 //    FATAL("SPLICING");
 
     struct queue_entry *target;
@@ -8245,9 +8248,30 @@ retry_splicing:
     /* First of all, if we've modified in_buf for havoc, let's clean that
        up... */
 
-    if (leak_input.mutation_seed_combined_buf != leak_input.raw_combined_buf) {
-      leak_input.mutation_seed_combined_buf = leak_input.raw_combined_buf;
-      len = leak_input.raw_combined_buf_len;
+    if ((leak_input.mutation_seed_public_len +
+        leak_input.mutation_seed_secret_len !=
+        leak_input.raw_combined_buf_len) ||
+        memcmp(leak_input.mutation_seed_combined_buf,
+               leak_input.raw_combined_buf,
+               leak_input.raw_combined_buf_len)
+        ) {
+
+      printf("Replacing mutation_seed_combined_buf with raw_combined_buf\n");
+
+      leak_input.mutation_seed_combined_buf = ck_realloc(
+          leak_input.mutation_seed_combined_buf,
+          leak_input.raw_combined_buf_len
+      );
+
+      if (!leak_input.mutation_seed_combined_buf) {
+        FATAL("Failed to malloc %u bytes for leak_input.mutation_seed_combined_buf",
+              leak_input.raw_combined_buf_len);
+      }
+
+      memcpy(leak_input.mutation_seed_combined_buf,
+             leak_input.raw_combined_buf,
+             leak_input.raw_combined_buf_len);
+
     }
 
     /* Pick a random queue entry and seek to it. Don't splice with yourself. */
@@ -8262,6 +8286,9 @@ retry_splicing:
     afl->splicing_with = tid;
     target = afl->queue_buf[tid];
     new_buf = queue_testcase_get(afl, target);
+
+    printf("Fetched queue[%u] for splicing: %.*s\n", tid, target->len, new_buf);
+    fflush(stdout);
 
     u8 *public_buf, *secret_buf;
     u32 public_len, secret_len;
@@ -8310,10 +8337,6 @@ retry_splicing:
       raw_combined_scratch_buf = leak_input.mutation_seed_combined_buf;
       leak_input.mutation_seed_combined_buf = tmp;
 
-      mutate_buf = ck_realloc(mutate_buf, len);
-      if (unlikely(!mutate_buf)) { PFATAL("alloc"); }
-      memcpy(mutate_buf, leak_input.mutation_seed_combined_buf, len);
-
     } else {
 
       len = combined_len;
@@ -8326,10 +8349,6 @@ retry_splicing:
       u8 *tmp = raw_combined_scratch_buf;
       raw_combined_scratch_buf = leak_input.mutation_seed_combined_buf;
       leak_input.mutation_seed_combined_buf = tmp;
-
-      mutate_buf = ck_realloc(mutate_buf, len);
-      if (unlikely(!mutate_buf)) { PFATAL("alloc"); }
-      memcpy(mutate_buf, leak_input.mutation_seed_combined_buf, len);
 
     }
 
@@ -8353,7 +8372,6 @@ retry_splicing:
 abandon_entry:
 
   if (afl->fsrv.leakage_hunting) {
-    ck_free(leak_input.mutation_seed_combined_buf);
     ck_free(leak_input.orig_public_buf);
     ck_free(leak_input.orig_secret_buf);
   }

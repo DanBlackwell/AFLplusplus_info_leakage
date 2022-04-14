@@ -16,21 +16,48 @@ void find_public_and_secret_inputs(const char *testcase_buf, u32 testcase_len,
                                    uint8_t **public_input, uint32_t *public_len,
                                    uint8_t **secret_input, uint32_t *secret_len) {
 
+
+  printf("Allocating %u bytes for testcase_buf\n", testcase_len);
+  fflush(stdout);
+
+  const char *raw_buf = testcase_buf;
+
   char *raw_public = malloc(testcase_len),
-       *raw_secret = malloc(testcase_len);
+      *raw_secret = malloc(testcase_len);
+
+  static char *terminated_buf = NULL;
+  static uint32_t terminated_buf_alloced = 0;
+  if (testcase_buf[testcase_len - 1] != '\0') {
+
+    if (testcase_len + 1 > terminated_buf_alloced) {
+
+      u32 bitcnt = 0, val = testcase_len;
+      while (val > 1) { bitcnt++; val >>= 1; }
+      terminated_buf_alloced = 1 << (bitcnt + 2);  // round up to next power of 2
+
+      terminated_buf = ck_realloc(terminated_buf, terminated_buf_alloced);
+      if (!terminated_buf) { PFATAL("realloc failed"); }
+
+    }
+
+    memcpy(terminated_buf, testcase_buf, testcase_len);
+    terminated_buf[testcase_len] = '\0';
+    raw_buf = terminated_buf;
+  }
 
   const struct json_attr_t json_attrs[] = {
       {PUBLIC_KEY, t_string, .addr.string = raw_public, .len = testcase_len },
-      {SECRET_KEY, t_string, .addr.string = raw_secret, .len = testcase_len }
+      {SECRET_KEY, t_string, .addr.string = raw_secret, .len = testcase_len },
+      {NULL}
   };
 
   char *end;
-  int err = json_read_object(testcase_buf, json_attrs, (const char **)&end);
+  int err = json_read_object(raw_buf, json_attrs, (const char **)&end);
 //  printf("json end: %p (%llu from start)\n", end, end - testcase_buf);
 
   if (err) {
-    printf("Failed to decode testcase_buf (json error: %s).\n  RAW: %s",
-           json_error_string(err), testcase_buf);
+    printf("Failed to decode testcase_buf (json error: %s).\ (gave it %u bytes)n  RAW: %s",
+           json_error_string(err), testcase_len, raw_buf);
     exit(1);
   }
 

@@ -78,7 +78,7 @@ PERMISSIONS
 #define str_starts_with(s, p)	(strncmp(s, p, strlen(p)) == 0)
 
 #ifdef DEBUG_ENABLE
-static int debuglevel = 0;
+static int debuglevel = 3;
 static FILE *debugfp;
 
 void json_enable_debug(int level, FILE * fp)
@@ -91,6 +91,8 @@ void json_enable_debug(int level, FILE * fp)
 static void json_trace(int errlevel, const char *fmt, ...)
 /* assemble command in printf(3) style */
 {
+    if (!debugfp) debugfp = stdout;
+
     if (errlevel <= debuglevel) {
 	char buf[BUFSIZ];
 	va_list ap;
@@ -104,6 +106,8 @@ static void json_trace(int errlevel, const char *fmt, ...)
 
 	(void)fputs(buf, debugfp);
     }
+
+    fflush(debugfp);
 }
 
 # define json_debug_trace(args) (void) json_trace args
