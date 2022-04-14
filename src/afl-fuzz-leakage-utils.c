@@ -413,7 +413,7 @@ leakage_save_if_interesting(afl_state_t *afl,
     afl->queue_top->public_output_buffer = ck_alloc(afl->fsrv.stdout_raw_buffer_len);
     memcpy(afl->queue_top->public_output_buffer, afl->fsrv.stdout_raw_buffer, afl->fsrv.stdout_raw_buffer_len);
 
-    printf("combined_buf: %s\n", (char *)combined_buf);
+    printf("json_combined_buf: %s\n", (char *)combined_buf);
     printf("public_input: %.*s, secret_input: %.*s\n", public_len, public_input_buf, secret_len, secret_input_buf);
     printf("public output (%u chars): %.*s\n", afl->fsrv.stdout_raw_buffer_len, afl->fsrv.stdout_raw_buffer_len, afl->fsrv.stdout_raw_buffer);
 

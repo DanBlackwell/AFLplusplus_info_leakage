@@ -5510,8 +5510,10 @@ u8 fuzz_one(afl_state_t *afl) {
 /* leakage stuff */
 
 struct leakage_test_input {
-  u8 *combined_buf;
-  u32 combined_buf_len;
+  u8 *json_combined_buf;
+  u32 json_combined_buf_len;
+  u8 *raw_combined_buf;
+  u32 raw_combined_buf_len;
   u8 *orig_public_buf;
   u32 orig_public_len;
   u8 *orig_secret_buf;
@@ -5526,9 +5528,9 @@ enum leakage_fuzz_phase {
   LEAKAGE_FUZZ_MUTATE_SECRET
 };
 
+u8 *raw_combined_scratch_buf = NULL;
 u8 *mutate_buf = NULL;
 u8 *leakage_scratch_buf = NULL;
-u32 leakage_scratch_buf_len;
 
 /* Take the current entry from the queue, fuzz it for a while. This
    function is a tad too long... returns 0 if fuzzed successfully, 1 if
@@ -5628,13 +5630,13 @@ u8 leakage_fuzz_one_original(afl_state_t *afl) {
   }
 
 
-  leak_input.combined_buf = queue_testcase_get(afl, afl->queue_cur);
-  leak_input.combined_buf_len = afl->queue_cur->len;
+  leak_input.json_combined_buf = queue_testcase_get(afl, afl->queue_cur);
+  leak_input.json_combined_buf_len = afl->queue_cur->len;
   len = temp_len = afl->queue_cur->len;
 
-  printf("testcase_buf (%d): %.*s\n", leak_input.combined_buf_len, leak_input.combined_buf_len, leak_input.combined_buf);
+  printf("testcase_buf (%d): %.*s\n", leak_input.json_combined_buf_len, leak_input.json_combined_buf_len, leak_input.json_combined_buf);
   fflush(stdout);
-  find_public_and_secret_inputs(leak_input.combined_buf, leak_input.combined_buf_len,
+  find_public_and_secret_inputs(leak_input.json_combined_buf, leak_input.json_combined_buf_len,
                                 &leak_input.orig_public_buf, &leak_input.orig_public_len,
                                 &leak_input.orig_secret_buf, &leak_input.orig_secret_len);
 
@@ -5724,7 +5726,9 @@ u8 leakage_fuzz_one_original(afl_state_t *afl) {
 
   leak_input.mutated_public_len = leak_input.orig_public_len;
   leak_input.mutated_secret_len = leak_input.orig_secret_len;
-  leak_input.mutated_combined_buf = ck_alloc(leak_input.mutated_public_len + leak_input.mutated_secret_len);
+  len = temp_len = leak_input.mutated_public_len + leak_input.mutated_secret_len;
+  leak_input.mutated_combined_buf = ck_alloc(len);
+  leak_input.raw_combined_buf = leak_input.mutated_combined_buf;
 
   memcpy(leak_input.mutated_combined_buf,
          leak_input.orig_public_buf,
@@ -8219,102 +8223,117 @@ havoc_stage:
 
 retry_splicing:
 
-  if (afl->use_splicing && splice_cycle++ < (afl->fsrv.leakage_hunting ? 2 : 1) * SPLICE_CYCLES &&
+  if (afl->use_splicing && splice_cycle++ < SPLICE_CYCLES &&
       afl->ready_for_splicing_count > 1 && afl->queue_cur->len >= 4) {
 
-    if (afl->fsrv.leakage_hunting) {
-      FATAL("Entering splice phase\n");
+    goto abandon_entry;
+//    FATAL("SPLICING");
+
+    struct queue_entry *target;
+    u32                 tid, split_at;
+    u8 *                new_buf;
+    s32                 f_diff, l_diff;
+
+    /* First of all, if we've modified in_buf for havoc, let's clean that
+       up... */
+
+    if (leak_input.mutated_combined_buf != leak_input.raw_combined_buf) {
+      leak_input.mutated_combined_buf = leak_input.raw_combined_buf;
+      len = leak_input.raw_combined_buf_len;
     }
-//
-//    struct queue_entry *target;
-//    u32                 tid, split_at;
-//    u8 *                new_buf;
-//    s32                 f_diff, l_diff;
-//
-//    /* First of all, if we've modified in_buf for havoc, let's clean that
-//       up... */
-//
-//    bool mutate_public = splice_cycle < SPLICE_CYCLES;
-//    if (afl->fsrv.leakage_hunting) {
-//
-//      in_buf = orig_in = mutate_public ? leak_input.public_buf : leak_input.secret_buf;
-//      len = mutate_public ? leak_input.public_len : leak_input.secret_len;
-//
-//    } else {
-//
-//      if (in_buf != orig_in) {
-//
-//        in_buf = orig_in;
-//        len = afl->queue_cur->len;
-//
-//      }
-//
-//    }
-//
-//    /* Pick a random queue entry and seek to it. Don't splice with yourself. */
-//
-//    do {
-//
-//      tid = rand_below(afl, afl->queued_paths);
-//
-//    } while (tid == afl->current_entry || afl->queue_buf[tid]->len < 4);
-//
-//    /* Get the testcase */
-//    afl->splicing_with = tid;
-//    target = afl->queue_buf[tid];
-//    new_buf = queue_testcase_get(afl, target);
-//
-//    u32 target_len = target->len;
-//    char *target_buf = new_buf;
-//
-//    if (afl->fsrv.leakage_hunting) {
-//      if (mutate_public) {
-//        public_input_for_queue_entry(target, &target_buf, &target_len);
-//      } else {
-//        secret_input_for_queue_entry(target, &target_buf, &target_len);
-//      }
-//    }
-//
-//    /* Find a suitable splicing location, somewhere between the first and
-//       the last differing byte. Bail out if the difference is just a single
-//       byte or so. */
-//
-//    locate_diffs(in_buf, new_buf, MIN(len, (s64)target_len), &f_diff, &l_diff);
-//
-//    if (f_diff < 0 || l_diff < 2 || f_diff == l_diff) { goto retry_splicing; }
-//
-//    /* Split somewhere between the first and last differing byte. */
-//
-//    split_at = f_diff + rand_below(afl, l_diff - f_diff);
-//
-//    /* Do the thing. */
-//
-//    len = target_len;
-//    afl->in_scratch_buf = afl_realloc(AFL_BUF_PARAM(in_scratch), len);
-//    memcpy(afl->in_scratch_buf, in_buf, split_at);
-//    memcpy(afl->in_scratch_buf + split_at, new_buf, len - split_at);
-//    in_buf = afl->in_scratch_buf;
-//    afl_swap_bufs(AFL_BUF_PARAM(in), AFL_BUF_PARAM(in_scratch));
-//
-//    out_buf = afl_realloc(AFL_BUF_PARAM(out), len);
-//    if (unlikely(!out_buf)) { PFATAL("alloc"); }
-//    memcpy(out_buf, in_buf, len);
-//
-//    if (afl->fsrv.leakage_hunting) {
-//      if (mutate_public) {
-//        leak_input.public_buf = ck_realloc(leak_input.public_buf, len);
-//      } else {
-//        leak_input.secret_buf = ck_realloc(leak_input.secret_buf, len);
-//      }
-//
-//      printf("splice: mutate_public: %d, Created spliced entry: %*.s\n",
-//             mutate_public,
-//             mutate_public ? leak_input.public_len : leak_input.secret_len,
-//             mutate_public ? leak_input.public_buf : leak_input.secret_buf);
-//      ck_free(target_buf);
-//    }
-//
-//    goto custom_mutator_stage;
+
+    /* Pick a random queue entry and seek to it. Don't splice with yourself. */
+
+    do {
+
+      tid = rand_below(afl, afl->queued_paths);
+
+    } while (tid == afl->current_entry || afl->queue_buf[tid]->len < 4);
+
+    /* Get the testcase */
+    afl->splicing_with = tid;
+    target = afl->queue_buf[tid];
+    new_buf = queue_testcase_get(afl, target);
+
+    u8 *public_buf, *secret_buf;
+    u32 public_len, secret_len;
+    find_public_and_secret_inputs(new_buf, target->len,
+                                  &public_buf, &public_len,
+                                  &secret_buf, &secret_len);
+
+    u32 combined_len = public_len + secret_len;
+    u8 *combined_buf = ck_alloc(combined_len);
+
+    ck_free(public_buf);
+    ck_free(secret_buf);
+
+    /* Find a suitable splicing location, somewhere between the first and
+       the last differing byte. Bail out if the difference is just a single
+       byte or so. */
+
+    if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
+      locate_diffs(leak_input.mutated_combined_buf,
+                   combined_buf,
+                   MIN(len, (s64)combined_len),
+                   &f_diff, &l_diff);
+    } else {
+      locate_diffs(leak_input.mutated_combined_buf + leak_input.mutated_public_len,
+                   combined_buf + public_len,
+                   MIN(leak_input.mutated_secret_len, secret_len),
+                   &f_diff, &l_diff);
+    }
+
+    if (f_diff < 0 || l_diff < 2 || f_diff == l_diff) { goto retry_splicing; }
+
+    /* Split somewhere between the first and last differing byte. */
+
+    split_at = f_diff + rand_below(afl, l_diff - f_diff);
+
+    /* Do the thing. */
+
+    if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
+
+      len = combined_len;
+      raw_combined_scratch_buf = ck_realloc(raw_combined_scratch_buf, len);
+      memcpy(raw_combined_scratch_buf, leak_input.mutated_combined_buf, split_at);
+      memcpy(raw_combined_scratch_buf + split_at, combined_buf, len - split_at);
+
+      u8 *tmp = raw_combined_scratch_buf;
+      raw_combined_scratch_buf = leak_input.mutated_combined_buf;
+      leak_input.mutated_combined_buf = tmp;
+
+      mutate_buf = ck_realloc(mutate_buf, len);
+      if (unlikely(!mutate_buf)) { PFATAL("alloc"); }
+      memcpy(mutate_buf, leak_input.mutated_combined_buf, len);
+
+    } else {
+
+      len = combined_len;
+      raw_combined_scratch_buf = ck_realloc(raw_combined_scratch_buf, len);
+      memcpy(raw_combined_scratch_buf, leak_input.mutated_combined_buf, leak_input.mutated_public_len + split_at);
+      memcpy(raw_combined_scratch_buf + leak_input.mutated_public_len + split_at,
+             combined_buf,
+             len - split_at);
+
+      u8 *tmp = raw_combined_scratch_buf;
+      raw_combined_scratch_buf = leak_input.mutated_combined_buf;
+      leak_input.mutated_combined_buf = tmp;
+
+      mutate_buf = ck_realloc(mutate_buf, len);
+      if (unlikely(!mutate_buf)) { PFATAL("alloc"); }
+      memcpy(mutate_buf, leak_input.mutated_combined_buf, len);
+
+    }
+
+    ck_free(combined_buf);
+
+    printf("Combined %.*s\nwith     %.*s, at pos %u, and got: \n%.*s",
+           leak_input.mutated_public_len + leak_input.mutated_secret_len,
+           leak_input.mutated_combined_buf,
+           combined_len, combined_buf, split_at, len, mutate_buf);
+    fflush(stdout);
+
+    goto custom_mutator_stage;
 
   }
 
