@@ -73,7 +73,7 @@ PERMISSIONS
 #include <time.h>
 #include <math.h>	/* for HUGE_VAL */
 
-#include "json.h"
+#include "../include/json.h"
 
 #define str_starts_with(s, p)	(strncmp(s, p, strlen(p)) == 0)
 

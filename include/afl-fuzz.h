@@ -1104,7 +1104,6 @@ u8   calibrate_case(afl_state_t *, struct queue_entry *, u8 *, u32, u8);
 void sync_fuzzers(afl_state_t *);
 u8   trim_case(afl_state_t *, struct queue_entry *, u8 *);
 u8   common_fuzz_stuff(afl_state_t *, u8 *, u32);
-u8   leakage_fuzz_stuff(afl_state_t *afl, u8 *public_in_buf, u32 public_len, u8 *secret_in_buf, u32 secret_len);
 
     /* Fuzz one */
 

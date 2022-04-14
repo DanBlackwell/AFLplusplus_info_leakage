@@ -29,6 +29,8 @@
 #include "cmplog.h"
 #include "leakage_utils.h"
 
+u8 leakage_fuzz_one_original(afl_state_t *afl);
+
 /* MOpt */
 
 static int select_algorithm(afl_state_t *afl, u32 max_algorithm) {
@@ -364,18 +366,6 @@ static void locate_diffs(u8 *ptr1, u8 *ptr2, u32 len, s32 *first, s32 *last) {
 
 #endif                                                     /* !IGNORE_FINDS */
 
-struct leakage_test_input {
-  u8 *public_buf;
-  u32 public_len;
-  u8 *secret_buf;
-  u32 secret_len;
-};
-
-enum leakage_fuzz_phase {
-  LEAKAGE_FUZZ_MUTATE_FULL_INPUT,
-  LEAKAGE_FUZZ_MUTATE_SECRET
-};
-
 /* Take the current entry from the queue, fuzz it for a while. This
    function is a tad too long... returns 0 if fuzzed successfully, 1 if
    skipped or bailed out. */
@@ -393,9 +383,6 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
   u8  a_collect[MAX_AUTO_EXTRA];
   u32 a_len = 0;
-
-  struct leakage_test_input leak_input = {};
-  enum leakage_fuzz_phase leak_fuzz_phase = LEAKAGE_FUZZ_MUTATE_FULL_INPUT;
 
 #ifdef IGNORE_FINDS
 
@@ -473,21 +460,8 @@ u8 fuzz_one_original(afl_state_t *afl) {
 
   }
 
-
   orig_in = in_buf = queue_testcase_get(afl, afl->queue_cur);
   len = afl->queue_cur->len;
-
-  if (afl->fsrv.leakage_hunting) {
-    find_public_and_secret_inputs(afl->queue_cur->testcase_buf, afl->queue_cur->len,
-                                  &leak_input.public_buf, &leak_input.public_len,
-                                  &leak_input.secret_buf, &leak_input.secret_len);
-
-    printf("Public_input (%d): %.*s\n", leak_input.public_len, leak_input.public_len, leak_input.public_buf);
-    printf("Secret_input (%d): %.*s\n", leak_input.secret_len, leak_input.secret_len, leak_input.secret_buf);
-    printf("testcase_buf (%d): %.*s\n", afl->queue_cur->len, afl->queue_cur->len, afl->queue_cur->testcase_buf);
-    fflush(stdout);
-
-  }
 
   out_buf = afl_realloc(AFL_BUF_PARAM(out), len);
   if (unlikely(!out_buf)) { PFATAL("alloc"); }
@@ -677,28 +651,21 @@ u8 fuzz_one_original(afl_state_t *afl) {
     /* While flipping the least significant bit in every byte, pull of an extra
        trick to detect possible syntax tokens. In essence, the idea is that if
        you have a binary blob like this:
-
        xxxxxxxxIHDRxxxxxxxx
-
        ...and changing the leading and trailing bytes causes variable or no
        changes in program flow, but touching any character in the "IHDR" string
        always produces the same, distinctive path, it's highly likely that
        "IHDR" is an atomically-checked magic value of special significance to
        the fuzzed format.
-
        We do this here, rather than as a separate stage, because it's a nice
        way to keep the operation approximately "free" (i.e., no extra execs).
-
        Empirically, performing the check when flipping the least significant bit
        is advantageous, compared to doing it at the time of more disruptive
        changes, where the program flow may be affected in more violent ways.
-
        The caveat is that we won't generate dictionaries in the -d mode or -S
        mode - but that's probably a fair trade-off.
-
        This won't work particularly well with paths that exhibit variable
        behavior, but fails gracefully, so we'll carry out the checks anyway.
-
       */
 
     if (!afl->non_instrumented_mode && (afl->stage_cur & 7) == 7) {
@@ -833,11 +800,9 @@ u8 fuzz_one_original(afl_state_t *afl) {
   afl->stage_cycles[STAGE_FLIP4] += afl->stage_max;
 
   /* Effector map setup. These macros calculate:
-
      EFF_APOS      - position of a particular file offset in the map.
      EFF_ALEN      - length of a map with a particular number of bytes.
      EFF_SPAN_ALEN - map span for a sequence of bytes.
-
    */
 
 #define EFF_APOS(_p) ((_p) >> EFF_MAP_SCALE2)
@@ -2052,41 +2017,7 @@ havoc_stage:
 
   }
 
-  u32 leakage_stages = afl->fsrv.leakage_hunting ? afl->stage_max : 0;
-
-  for (afl->stage_cur = 0; afl->stage_cur < afl->stage_max + leakage_stages; ++afl->stage_cur) {
-
-    if (afl->stage_cur >= afl->stage_max) {
-      leak_fuzz_phase = LEAKAGE_FUZZ_MUTATE_SECRET;
-      printf("In LEAKAGE_FUZZ_MUTATE_SECRET phase\n");
-    }
-
-    bool mutate_public = false;
-
-    if (afl->fsrv.leakage_hunting) {
-      switch (leak_fuzz_phase) {
-        case LEAKAGE_FUZZ_MUTATE_FULL_INPUT: {
-          u32 combined_len = leak_input.public_len + leak_input.secret_len;
-          mutate_public =
-              leak_input.public_len <= rand_below(afl, combined_len);
-          break;
-        }
-        case LEAKAGE_FUZZ_MUTATE_SECRET:
-          mutate_public = false;
-          break;
-      }
-
-      orig_in = in_buf =
-          mutate_public ? leak_input.public_buf : leak_input.secret_buf;
-
-      len = mutate_public ? leak_input.public_len : leak_input.secret_len;
-      temp_len = len;
-
-      out_buf = afl_realloc(AFL_BUF_PARAM(out), len);
-      if (unlikely(!out_buf)) { PFATAL("alloc"); }
-
-      memcpy(out_buf, in_buf, len);
-    }
+  for (afl->stage_cur = 0; afl->stage_cur < afl->stage_max; ++afl->stage_cur) {
 
     u32 use_stacking = 1 << (1 + rand_below(afl, afl->havoc_stack_pow2));
 
@@ -2719,8 +2650,6 @@ havoc_stage:
 
           } while (tid == afl->current_entry || afl->queue_buf[tid]->len < 4);
 
-          printf("WEIRD splice\n");
-
           /* Get the testcase for splicing. */
           struct queue_entry *target = afl->queue_buf[tid];
           u32                 new_len = target->len;
@@ -2792,97 +2721,7 @@ havoc_stage:
 
     }
 
-    if (!afl->fsrv.leakage_hunting) {
-      if (common_fuzz_stuff(afl, out_buf, temp_len)) { goto abandon_entry; }
-    } else {
-      u8 *public_buf, *secret_buf;
-      u32 public_len,  secret_len;
-
-      if (mutate_public) {
-        public_buf = out_buf;
-        public_len = temp_len;
-        secret_buf = leak_input.secret_buf;
-        secret_len = leak_input.secret_len;
-      } else {
-        public_buf = leak_input.public_buf;
-        public_len = leak_input.public_len;
-        secret_buf = out_buf;
-        secret_len = temp_len;
-      }
-
-      if (leakage_fuzz_stuff(afl,
-                             public_buf, public_len,
-                             secret_buf, secret_len)
-          ) {
-        goto abandon_entry;
-      }
-
-      u32 len = afl->fsrv.stdout_raw_buffer_len;
-      char *tmp = malloc(len * 2);
-      u32 tmp_len = 0;
-      for (u32 i = 0; i < len; i++, tmp_len++) {
-        if (afl->fsrv.stdout_raw_buffer[i] == '\n') {
-          tmp[tmp_len++] = '\\';
-          tmp[tmp_len] = 'n';
-        } else {
-          tmp[tmp_len] = afl->fsrv.stdout_raw_buffer[i];
-        }
-      }
-
-      printf("Tested (mutate_public: %d): { L: %.*s, H: %.*s, O: \"%.*s\" }\n",
-             mutate_public, public_len, public_buf, secret_len, secret_buf, tmp_len, tmp);
-      free(tmp);
-    }
-
-    if (afl->fsrv.stdout_raw_buffer) {
-      if (!afl->queue_cur->public_output_buffer) {
-        FATAL("Don't have the expected output for queued path %u",
-              afl->current_entry);
-      }
-    }
-//
-//      if (!mutate_public) {
-//        bool leaks =
-//            afl->fsrv.stdout_raw_buffer_len != afl->queue_cur->public_output_bufer_len ||
-//            memcmp(
-//                afl->fsrv.stdout_raw_buffer,
-//                afl->queue_cur->public_output_buffer,
-//                afl->fsrv.stdout_raw_buffer_len
-//            );
-//
-//        if (leaks) {
-//
-//          char *low1 = malloc(Base64encode_len(afl->queue_cur->public_input_len));
-//          Base64encode(low1,
-//                       afl->queue_cur->public_input_start,
-//                       afl->queue_cur->public_input_len);
-//          char *low2 = malloc(Base64encode_len(leak_input.public_len));
-//          Base64encode(low2, leak_input.public_buf, leak_input.public_len);
-//
-//          char *secret1 = malloc(Base64encode_len(afl->queue_cur->secret_input_len));
-//          Base64encode(secret1,
-//                       afl->queue_cur->secret_input_start,
-//                       afl->queue_cur->secret_input_len);
-//          char *secret2 = malloc(Base64encode_len(temp_len));
-//          Base64encode(secret2, out_buf, leak_input.secret_len);
-//
-//          char *out1 = malloc(Base64encode_len(afl->queue_cur->public_output_bufer_len));
-//          Base64encode(out1,
-//                       afl->queue_cur->public_output_buffer,
-//                       afl->queue_cur->public_output_bufer_len);
-//          char *out2 = malloc(Base64encode_len(afl->fsrv.stdout_raw_buffer_len));
-//          Base64encode(out2,
-//                       afl->fsrv.stdout_raw_buffer,
-//                       afl->fsrv.stdout_raw_buffer_len);
-//
-//          FATAL("Leakage detected for hypertest pair: \n"
-//                "{\n  LOW: %s,\n  HIGH: %s,\n  OUT: %s\n}"
-//                "{\n  LOW: %s,\n  HIGH: %s,\n  OUT: %s\n}",
-//                low1, secret1, out1, low2, secret2, out2);
-//
-//        }
-//      }
-//    }
+    if (common_fuzz_stuff(afl, out_buf, temp_len)) { goto abandon_entry; }
 
     /* out_buf might have been mangled a bit, so let's restore it to its
        original size and shape. */
@@ -2937,12 +2776,8 @@ havoc_stage:
 
 retry_splicing:
 
-  if (afl->use_splicing && splice_cycle++ < (afl->fsrv.leakage_hunting ? 2 : 1) * SPLICE_CYCLES &&
+  if (afl->use_splicing && splice_cycle++ < SPLICE_CYCLES &&
       afl->ready_for_splicing_count > 1 && afl->queue_cur->len >= 4) {
-
-    if (afl->fsrv.leakage_hunting) {
-      printf("Entering splice phase\n");
-    }
 
     struct queue_entry *target;
     u32                 tid, split_at;
@@ -2952,20 +2787,10 @@ retry_splicing:
     /* First of all, if we've modified in_buf for havoc, let's clean that
        up... */
 
-    bool mutate_public = splice_cycle < SPLICE_CYCLES;
-    if (afl->fsrv.leakage_hunting) {
+    if (in_buf != orig_in) {
 
-      in_buf = orig_in = mutate_public ? leak_input.public_buf : leak_input.secret_buf;
-      len = mutate_public ? leak_input.public_len : leak_input.secret_len;
-
-    } else {
-
-      if (in_buf != orig_in) {
-
-        in_buf = orig_in;
-        len = afl->queue_cur->len;
-
-      }
+      in_buf = orig_in;
+      len = afl->queue_cur->len;
 
     }
 
@@ -2982,22 +2807,11 @@ retry_splicing:
     target = afl->queue_buf[tid];
     new_buf = queue_testcase_get(afl, target);
 
-    u32 target_len = target->len;
-    char *target_buf = new_buf;
-
-    if (afl->fsrv.leakage_hunting) {
-      if (mutate_public) {
-        public_input_for_queue_entry(target, &target_buf, &target_len);
-      } else {
-        secret_input_for_queue_entry(target, &target_buf, &target_len);
-      }
-    }
-
     /* Find a suitable splicing location, somewhere between the first and
        the last differing byte. Bail out if the difference is just a single
        byte or so. */
 
-    locate_diffs(in_buf, new_buf, MIN(len, (s64)target_len), &f_diff, &l_diff);
+    locate_diffs(in_buf, new_buf, MIN(len, (s64)target->len), &f_diff, &l_diff);
 
     if (f_diff < 0 || l_diff < 2 || f_diff == l_diff) { goto retry_splicing; }
 
@@ -3007,7 +2821,7 @@ retry_splicing:
 
     /* Do the thing. */
 
-    len = target_len;
+    len = target->len;
     afl->in_scratch_buf = afl_realloc(AFL_BUF_PARAM(in_scratch), len);
     memcpy(afl->in_scratch_buf, in_buf, split_at);
     memcpy(afl->in_scratch_buf + split_at, new_buf, len - split_at);
@@ -3017,20 +2831,6 @@ retry_splicing:
     out_buf = afl_realloc(AFL_BUF_PARAM(out), len);
     if (unlikely(!out_buf)) { PFATAL("alloc"); }
     memcpy(out_buf, in_buf, len);
-
-    if (afl->fsrv.leakage_hunting) {
-      if (mutate_public) {
-        leak_input.public_buf = ck_realloc(leak_input.public_buf, len);
-      } else {
-        leak_input.secret_buf = ck_realloc(leak_input.secret_buf, len);
-      }
-
-      printf("splice: mutate_public: %d, Created spliced entry: %*.s\n",
-             mutate_public,
-             mutate_public ? leak_input.public_len : leak_input.secret_len,
-             mutate_public ? leak_input.public_buf : leak_input.secret_buf);
-      ck_free(target_buf);
-    }
 
     goto custom_mutator_stage;
 
@@ -3042,11 +2842,6 @@ retry_splicing:
 
 /* we are through with this queue entry - for this iteration */
 abandon_entry:
-
-  if (afl->fsrv.leakage_hunting) {
-    ck_free(leak_input.public_buf);
-    ck_free(leak_input.secret_buf);
-  }
 
   afl->splicing_with = -1;
 
@@ -3075,6 +2870,7 @@ abandon_entry:
 #undef FLIP_BIT
 
 }
+
 
 /* MOpt mode */
 static u8 mopt_common_fuzzing(afl_state_t *afl, MOpt_globals_t MOpt_globals) {
@@ -5681,7 +5477,13 @@ u8 fuzz_one(afl_state_t *afl) {
 
   // if limit_time_sig == -1 then both are run after each other
 
-  if (afl->limit_time_sig <= 0) { key_val_lv_1 = fuzz_one_original(afl); }
+  if (afl->limit_time_sig <= 0) {
+    if (afl->fsrv.leakage_hunting) {
+      key_val_lv_1 = leakage_fuzz_one_original(afl);
+    } else {
+      key_val_lv_1 = fuzz_one_original(afl);
+    }
+  }
 
   if (afl->limit_time_sig != 0) {
 
@@ -5705,3 +5507,2857 @@ u8 fuzz_one(afl_state_t *afl) {
 
 }
 
+/* leakage stuff */
+
+struct leakage_test_input {
+  u8 *combined_buf;
+  u32 combined_buf_len;
+  u8 *orig_public_buf;
+  u32 orig_public_len;
+  u8 *orig_secret_buf;
+  u32 orig_secret_len;
+  u8 *mutated_combined_buf;
+  u32 mutated_public_len;
+  u32 mutated_secret_len;
+};
+
+enum leakage_fuzz_phase {
+  LEAKAGE_FUZZ_MUTATE_FULL_INPUT,
+  LEAKAGE_FUZZ_MUTATE_SECRET
+};
+
+u8 *mutate_buf = NULL;
+u8 *leakage_scratch_buf = NULL;
+u32 leakage_scratch_buf_len;
+
+/* Take the current entry from the queue, fuzz it for a while. This
+   function is a tad too long... returns 0 if fuzzed successfully, 1 if
+   skipped or bailed out. */
+
+u8 leakage_fuzz_one_original(afl_state_t *afl) {
+
+  u32 len, temp_len;
+  u32 j;
+  u32 i;
+  u8 *ex_tmp, *eff_map = 0;
+  u64 havoc_queued = 0, orig_hit_cnt, new_hit_cnt = 0, prev_cksum;
+  u32 splice_cycle = 0, perf_score = 100, orig_perf, eff_cnt = 1;
+
+  u8 ret_val = 1, doing_det = 0;
+
+  u8  a_collect[MAX_AUTO_EXTRA];
+  u32 a_len = 0;
+
+  struct leakage_test_input leak_input = {};
+  enum leakage_fuzz_phase leak_fuzz_phase = LEAKAGE_FUZZ_MUTATE_FULL_INPUT;
+
+#ifdef IGNORE_FINDS
+
+  /* In IGNORE_FINDS mode, skip any entries that weren't in the
+     initial data set. */
+
+  if (afl->queue_cur->depth > 1) return 1;
+
+#else
+
+  if (unlikely(afl->custom_mutators_count)) {
+
+    /* The custom mutator will decide to skip this test case or not. */
+
+    LIST_FOREACH(&afl->custom_mutator_list, struct custom_mutator, {
+
+      if (el->afl_custom_queue_get &&
+          !el->afl_custom_queue_get(el->data, afl->queue_cur->fname)) {
+
+        return 1;
+
+      }
+
+    });
+
+  }
+
+  if (likely(afl->pending_favored)) {
+
+    /* If we have any favored, non-fuzzed new arrivals in the queue,
+       possibly skip to them at the expense of already-fuzzed or non-favored
+       cases. */
+
+    if (((afl->queue_cur->was_fuzzed > 0 || afl->queue_cur->fuzz_level > 0) ||
+         !afl->queue_cur->favored) &&
+        likely(rand_below(afl, 100) < SKIP_TO_NEW_PROB)) {
+
+      return 1;
+
+    }
+
+  } else if (!afl->non_instrumented_mode && !afl->queue_cur->favored &&
+
+             afl->queued_paths > 10) {
+
+    /* Otherwise, still possibly skip non-favored cases, albeit less often.
+       The odds of skipping stuff are higher for already-fuzzed inputs and
+       lower for never-fuzzed entries. */
+
+    if (afl->queue_cycle > 1 &&
+        (afl->queue_cur->fuzz_level == 0 || afl->queue_cur->was_fuzzed)) {
+
+      if (likely(rand_below(afl, 100) < SKIP_NFAV_NEW_PROB)) { return 1; }
+
+    } else {
+
+      if (likely(rand_below(afl, 100) < SKIP_NFAV_OLD_PROB)) { return 1; }
+
+    }
+
+  }
+
+#endif                                                     /* ^IGNORE_FINDS */
+
+  if (unlikely(afl->not_on_tty)) {
+
+    ACTF(
+        "Fuzzing test case #%u (%u total, %llu uniq crashes found, "
+        "perf_score=%0.0f, exec_us=%llu, hits=%u, map=%u)...",
+        afl->current_entry, afl->queued_paths, afl->unique_crashes,
+        afl->queue_cur->perf_score, afl->queue_cur->exec_us,
+        likely(afl->n_fuzz) ? afl->n_fuzz[afl->queue_cur->n_fuzz_entry] : 0,
+        afl->queue_cur->bitmap_size);
+    fflush(stdout);
+
+  }
+
+
+  leak_input.combined_buf = queue_testcase_get(afl, afl->queue_cur);
+  leak_input.combined_buf_len = afl->queue_cur->len;
+  len = temp_len = afl->queue_cur->len;
+
+  printf("testcase_buf (%d): %.*s\n", leak_input.combined_buf_len, leak_input.combined_buf_len, leak_input.combined_buf);
+  fflush(stdout);
+  find_public_and_secret_inputs(leak_input.combined_buf, leak_input.combined_buf_len,
+                                &leak_input.orig_public_buf, &leak_input.orig_public_len,
+                                &leak_input.orig_secret_buf, &leak_input.orig_secret_len);
+
+  printf("Public_input (%d): %.*s\n", leak_input.orig_public_len, leak_input.orig_public_len, leak_input.orig_public_buf);
+  printf("Secret_input (%d): %.*s\n", leak_input.orig_secret_len, leak_input.orig_secret_len, leak_input.orig_secret_buf);
+  fflush(stdout);
+
+  afl->subseq_tmouts = 0;
+
+  afl->cur_depth = afl->queue_cur->depth;
+
+  /*******************************************
+   * CALIBRATION (only if failed earlier on) *
+   *******************************************/
+
+  // TODO: Reimplement for leakage!
+
+//  if (unlikely(afl->queue_cur->cal_failed)) {
+//
+//    u8 res = FSRV_RUN_TMOUT;
+//
+//    if (afl->queue_cur->cal_failed < CAL_CHANCES) {
+//
+//      afl->queue_cur->exec_cksum = 0;
+//
+//      res =
+//          calibrate_case(afl, afl->queue_cur, in_buf, afl->queue_cycle - 1, 0);
+//
+//      if (unlikely(res == FSRV_RUN_ERROR)) {
+//
+//        FATAL("Unable to execute target application");
+//
+//      }
+//
+//    }
+//
+//    if (unlikely(afl->stop_soon) || res != afl->crash_mode) {
+//
+//      ++afl->cur_skipped_paths;
+//      goto abandon_entry;
+//
+//    }
+//
+//  }
+
+  /************
+   * TRIMMING *
+   ************/
+
+  // TODO: Reimplement for leakage!
+
+//  if (unlikely(!afl->non_instrumented_mode && !afl->queue_cur->trim_done &&
+//               !afl->disable_trim)) {
+//
+//    if (afl->fsrv.leakage_hunting) {
+//      printf("WARNING: Trimming running but probably won't work properly\n");
+//    }
+//
+//    u32 old_len = afl->queue_cur->len;
+//
+//    u8 res = trim_case(afl, afl->queue_cur, in_buf);
+//    orig_in = in_buf = queue_testcase_get(afl, afl->queue_cur);
+//
+//    if (unlikely(res == FSRV_RUN_ERROR)) {
+//
+//      FATAL("Unable to execute target application");
+//
+//    }
+//
+//    if (unlikely(afl->stop_soon)) {
+//
+//      ++afl->cur_skipped_paths;
+//      goto abandon_entry;
+//
+//    }
+//
+//    /* Don't retry trimming, even if it failed. */
+//
+//    afl->queue_cur->trim_done = 1;
+//
+//    len = afl->queue_cur->len;
+//
+//    /* maybe current entry is not ready for splicing anymore */
+//    if (unlikely(len <= 4 && old_len > 4)) --afl->ready_for_splicing_count;
+//
+//  }
+
+  leak_input.mutated_public_len = leak_input.orig_public_len;
+  leak_input.mutated_secret_len = leak_input.orig_secret_len;
+  leak_input.mutated_combined_buf = ck_alloc(leak_input.mutated_public_len + leak_input.mutated_secret_len);
+
+  memcpy(leak_input.mutated_combined_buf,
+         leak_input.orig_public_buf,
+         leak_input.mutated_public_len);
+
+  memcpy(leak_input.mutated_combined_buf + leak_input.mutated_public_len,
+         leak_input.orig_secret_buf,
+         leak_input.mutated_secret_len);
+
+  /*********************
+   * PERFORMANCE SCORE *
+   *********************/
+
+  // TODO: reimplement for leakage!
+
+//  if (likely(!afl->old_seed_selection))
+//    orig_perf = perf_score = afl->queue_cur->perf_score;
+//  else
+//    afl->queue_cur->perf_score = orig_perf = perf_score =
+//        calculate_score(afl, afl->queue_cur);
+//
+//  if (unlikely(perf_score <= 0)) { goto abandon_entry; }
+//
+//  if (unlikely(afl->shm.cmplog_mode &&
+//               afl->queue_cur->colorized < afl->cmplog_lvl &&
+//               (u32)len <= afl->cmplog_max_filesize)) {
+//
+//    if (unlikely(len < 4)) {
+//
+//      afl->queue_cur->colorized = CMPLOG_LVL_MAX;
+//
+//    } else {
+//
+//      if (afl->cmplog_lvl == 3 ||
+//          (afl->cmplog_lvl == 2 && afl->queue_cur->tc_ref) ||
+//          afl->queue_cur->favored ||
+//          !(afl->fsrv.total_execs % afl->queued_paths) ||
+//          get_cur_time() - afl->last_path_time > 300000) {  // 300 seconds
+//
+//        if (afl->fsrv.leakage_hunting) {
+//          printf(
+//              "WARNING: running input_to_state_stage which probably doesn't work\n");
+//        }
+//
+//        if (input_to_state_stage(afl, in_buf, out_buf, len)) {
+//
+//          goto abandon_entry;
+//
+//        }
+//
+//      }
+//
+//    }
+//
+//  }
+
+  /* Skip right away if -d is given, if it has not been chosen sufficiently
+     often to warrant the expensive deterministic stage (fuzz_level), or
+     if it has gone through deterministic testing in earlier, resumed runs
+     (passed_det). */
+
+  if (likely(afl->queue_cur->passed_det) || likely(afl->skip_deterministic) ||
+      likely(perf_score <
+             (afl->queue_cur->depth * 30 <= afl->havoc_max_mult * 100
+                  ? afl->queue_cur->depth * 30
+                  : afl->havoc_max_mult * 100))) {
+
+    goto custom_mutator_stage;
+
+  }
+
+  /* Skip deterministic fuzzing if exec path checksum puts this out of scope
+     for this main instance. */
+
+  if (unlikely(afl->main_node_max &&
+               (afl->queue_cur->exec_cksum % afl->main_node_max) !=
+                   afl->main_node_id - 1)) {
+
+    goto custom_mutator_stage;
+
+  }
+
+  doing_det = 1;
+
+  if (afl->fsrv.leakage_hunting) {
+    FATAL("Det3erministic fuzzing not implemented!");
+  }
+
+  /*********************************************
+   * SIMPLE BITFLIP (+dictionary construction) *
+   *********************************************/
+
+#define FLIP_BIT(_ar, _b)                   \
+  do {                                      \
+                                            \
+    u8 *_arf = (u8 *)(_ar);                 \
+    u32 _bf = (_b);                         \
+    _arf[(_bf) >> 3] ^= (128 >> ((_bf)&7)); \
+                                            \
+  } while (0)
+
+  /* Single walking bit. */
+
+  afl->stage_short = "flip1";
+  afl->stage_max = len << 3;
+  afl->stage_name = "bitflip 1/1";
+
+  afl->stage_val_type = STAGE_VAL_NONE;
+
+  orig_hit_cnt = afl->queued_paths + afl->unique_crashes;
+
+  prev_cksum = afl->queue_cur->exec_cksum;
+
+//  for (afl->stage_cur = 0; afl->stage_cur < afl->stage_max; ++afl->stage_cur) {
+//
+//    afl->stage_cur_byte = afl->stage_cur >> 3;
+//
+//    FLIP_BIT(out_buf, afl->stage_cur);
+//
+//#ifdef INTROSPECTION
+//    snprintf(afl->mutation, sizeof(afl->mutation), "%s FLIP_BIT1-%u",
+//             afl->queue_cur->fname, afl->stage_cur);
+//#endif
+//
+//    if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//
+//    FLIP_BIT(out_buf, afl->stage_cur);
+//
+//    /* While flipping the least significant bit in every byte, pull of an extra
+//       trick to detect possible syntax tokens. In essence, the idea is that if
+//       you have a binary blob like this:
+//
+//       xxxxxxxxIHDRxxxxxxxx
+//
+//       ...and changing the leading and trailing bytes causes variable or no
+//       changes in program flow, but touching any character in the "IHDR" string
+//       always produces the same, distinctive path, it's highly likely that
+//       "IHDR" is an atomically-checked magic value of special significance to
+//       the fuzzed format.
+//
+//       We do this here, rather than as a separate stage, because it's a nice
+//       way to keep the operation approximately "free" (i.e., no extra execs).
+//
+//       Empirically, performing the check when flipping the least significant bit
+//       is advantageous, compared to doing it at the time of more disruptive
+//       changes, where the program flow may be affected in more violent ways.
+//
+//       The caveat is that we won't generate dictionaries in the -d mode or -S
+//       mode - but that's probably a fair trade-off.
+//
+//       This won't work particularly well with paths that exhibit variable
+//       behavior, but fails gracefully, so we'll carry out the checks anyway.
+//
+//      */
+//
+//    if (!afl->non_instrumented_mode && (afl->stage_cur & 7) == 7) {
+//
+//      u64 cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
+//
+//      if (afl->stage_cur == afl->stage_max - 1 && cksum == prev_cksum) {
+//
+//        /* If at end of file and we are still collecting a string, grab the
+//           final character and force output. */
+//
+//        if (a_len < MAX_AUTO_EXTRA) {
+//
+//          a_collect[a_len] = out_buf[afl->stage_cur >> 3];
+//
+//        }
+//
+//        ++a_len;
+//
+//        if (a_len >= MIN_AUTO_EXTRA && a_len <= MAX_AUTO_EXTRA) {
+//
+//          maybe_add_auto(afl, a_collect, a_len);
+//
+//        }
+//
+//      } else if (cksum != prev_cksum) {
+//
+//        /* Otherwise, if the checksum has changed, see if we have something
+//           worthwhile queued up, and collect that if the answer is yes. */
+//
+//        if (a_len >= MIN_AUTO_EXTRA && a_len <= MAX_AUTO_EXTRA) {
+//
+//          maybe_add_auto(afl, a_collect, a_len);
+//
+//        }
+//
+//        a_len = 0;
+//        prev_cksum = cksum;
+//
+//      }
+//
+//      /* Continue collecting string, but only if the bit flip actually made
+//         any difference - we don't want no-op tokens. */
+//
+//      if (cksum != afl->queue_cur->exec_cksum) {
+//
+//        if (a_len < MAX_AUTO_EXTRA) {
+//
+//          a_collect[a_len] = out_buf[afl->stage_cur >> 3];
+//
+//        }
+//
+//        ++a_len;
+//
+//      }
+//
+//    }
+//
+//  }
+//
+//  new_hit_cnt = afl->queued_paths + afl->unique_crashes;
+//
+//  afl->stage_finds[STAGE_FLIP1] += new_hit_cnt - orig_hit_cnt;
+//  afl->stage_cycles[STAGE_FLIP1] += afl->stage_max;
+//
+//  /* Two walking bits. */
+//
+//  afl->stage_name = "bitflip 2/1";
+//  afl->stage_short = "flip2";
+//  afl->stage_max = (len << 3) - 1;
+//
+//  orig_hit_cnt = new_hit_cnt;
+//
+//  for (afl->stage_cur = 0; afl->stage_cur < afl->stage_max; ++afl->stage_cur) {
+//
+//    afl->stage_cur_byte = afl->stage_cur >> 3;
+//
+//    FLIP_BIT(out_buf, afl->stage_cur);
+//    FLIP_BIT(out_buf, afl->stage_cur + 1);
+//
+//#ifdef INTROSPECTION
+//    snprintf(afl->mutation, sizeof(afl->mutation), "%s FLIP_BIT2-%u",
+//             afl->queue_cur->fname, afl->stage_cur);
+//#endif
+//
+//    if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//
+//    FLIP_BIT(out_buf, afl->stage_cur);
+//    FLIP_BIT(out_buf, afl->stage_cur + 1);
+//
+//  }
+//
+//  new_hit_cnt = afl->queued_paths + afl->unique_crashes;
+//
+//  afl->stage_finds[STAGE_FLIP2] += new_hit_cnt - orig_hit_cnt;
+//  afl->stage_cycles[STAGE_FLIP2] += afl->stage_max;
+//
+//  /* Four walking bits. */
+//
+//  afl->stage_name = "bitflip 4/1";
+//  afl->stage_short = "flip4";
+//  afl->stage_max = (len << 3) - 3;
+//
+//  orig_hit_cnt = new_hit_cnt;
+//
+//  for (afl->stage_cur = 0; afl->stage_cur < afl->stage_max; ++afl->stage_cur) {
+//
+//    afl->stage_cur_byte = afl->stage_cur >> 3;
+//
+//    FLIP_BIT(out_buf, afl->stage_cur);
+//    FLIP_BIT(out_buf, afl->stage_cur + 1);
+//    FLIP_BIT(out_buf, afl->stage_cur + 2);
+//    FLIP_BIT(out_buf, afl->stage_cur + 3);
+//
+//#ifdef INTROSPECTION
+//    snprintf(afl->mutation, sizeof(afl->mutation), "%s FLIP_BIT4-%u",
+//             afl->queue_cur->fname, afl->stage_cur);
+//#endif
+//
+//    if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//
+//    FLIP_BIT(out_buf, afl->stage_cur);
+//    FLIP_BIT(out_buf, afl->stage_cur + 1);
+//    FLIP_BIT(out_buf, afl->stage_cur + 2);
+//    FLIP_BIT(out_buf, afl->stage_cur + 3);
+//
+//  }
+//
+//  new_hit_cnt = afl->queued_paths + afl->unique_crashes;
+//
+//  afl->stage_finds[STAGE_FLIP4] += new_hit_cnt - orig_hit_cnt;
+//  afl->stage_cycles[STAGE_FLIP4] += afl->stage_max;
+//
+//  /* Effector map setup. These macros calculate:
+//
+//     EFF_APOS      - position of a particular file offset in the map.
+//     EFF_ALEN      - length of a map with a particular number of bytes.
+//     EFF_SPAN_ALEN - map span for a sequence of bytes.
+//
+//   */
+//
+//#define EFF_APOS(_p) ((_p) >> EFF_MAP_SCALE2)
+//#define EFF_REM(_x) ((_x) & ((1 << EFF_MAP_SCALE2) - 1))
+//#define EFF_ALEN(_l) (EFF_APOS(_l) + !!EFF_REM(_l))
+//#define EFF_SPAN_ALEN(_p, _l) (EFF_APOS((_p) + (_l)-1) - EFF_APOS(_p) + 1)
+//
+//  /* Initialize effector map for the next step (see comments below). Always
+//     flag first and last byte as doing something. */
+//
+//  eff_map = afl_realloc(AFL_BUF_PARAM(eff), EFF_ALEN(len));
+//  if (unlikely(!eff_map)) { PFATAL("alloc"); }
+//  eff_map[0] = 1;
+//
+//  if (EFF_APOS(len - 1) != 0) {
+//
+//    eff_map[EFF_APOS(len - 1)] = 1;
+//    ++eff_cnt;
+//
+//  }
+//
+//  /* Walking byte. */
+//
+//  afl->stage_name = "bitflip 8/8";
+//  afl->stage_short = "flip8";
+//  afl->stage_max = len;
+//
+//  orig_hit_cnt = new_hit_cnt;
+//
+//  for (afl->stage_cur = 0; afl->stage_cur < afl->stage_max; ++afl->stage_cur) {
+//
+//    afl->stage_cur_byte = afl->stage_cur;
+//
+//    out_buf[afl->stage_cur] ^= 0xFF;
+//
+//#ifdef INTROSPECTION
+//    snprintf(afl->mutation, sizeof(afl->mutation), "%s FLIP_BIT8-%u",
+//             afl->queue_cur->fname, afl->stage_cur);
+//#endif
+//
+//    if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//
+//    /* We also use this stage to pull off a simple trick: we identify
+//       bytes that seem to have no effect on the current execution path
+//       even when fully flipped - and we skip them during more expensive
+//       deterministic stages, such as arithmetics or known ints. */
+//
+//    if (!eff_map[EFF_APOS(afl->stage_cur)]) {
+//
+//      u64 cksum;
+//
+//      /* If in non-instrumented mode or if the file is very short, just flag
+//         everything without wasting time on checksums. */
+//
+//      if (!afl->non_instrumented_mode && len >= EFF_MIN_LEN) {
+//
+//        cksum = hash64(afl->fsrv.trace_bits, afl->fsrv.map_size, HASH_CONST);
+//
+//      } else {
+//
+//        cksum = ~afl->queue_cur->exec_cksum;
+//
+//      }
+//
+//      if (cksum != afl->queue_cur->exec_cksum) {
+//
+//        eff_map[EFF_APOS(afl->stage_cur)] = 1;
+//        ++eff_cnt;
+//
+//      }
+//
+//    }
+//
+//    out_buf[afl->stage_cur] ^= 0xFF;
+//
+//  }
+//
+//  /* If the effector map is more than EFF_MAX_PERC dense, just flag the
+//     whole thing as worth fuzzing, since we wouldn't be saving much time
+//     anyway. */
+//
+//  if (eff_cnt != (u32)EFF_ALEN(len) &&
+//      eff_cnt * 100 / EFF_ALEN(len) > EFF_MAX_PERC) {
+//
+//    memset(eff_map, 1, EFF_ALEN(len));
+//
+//    afl->blocks_eff_select += EFF_ALEN(len);
+//
+//  } else {
+//
+//    afl->blocks_eff_select += eff_cnt;
+//
+//  }
+//
+//  afl->blocks_eff_total += EFF_ALEN(len);
+//
+//  new_hit_cnt = afl->queued_paths + afl->unique_crashes;
+//
+//  afl->stage_finds[STAGE_FLIP8] += new_hit_cnt - orig_hit_cnt;
+//  afl->stage_cycles[STAGE_FLIP8] += afl->stage_max;
+//
+//  /* Two walking bytes. */
+//
+//  if (len < 2) { goto skip_bitflip; }
+//
+//  afl->stage_name = "bitflip 16/8";
+//  afl->stage_short = "flip16";
+//  afl->stage_cur = 0;
+//  afl->stage_max = len - 1;
+//
+//  orig_hit_cnt = new_hit_cnt;
+//
+//  for (i = 0; i < len - 1; ++i) {
+//
+//    /* Let's consult the effector map... */
+//
+//    if (!eff_map[EFF_APOS(i)] && !eff_map[EFF_APOS(i + 1)]) {
+//
+//      --afl->stage_max;
+//      continue;
+//
+//    }
+//
+//    afl->stage_cur_byte = i;
+//
+//    *(u16 *)(out_buf + i) ^= 0xFFFF;
+//
+//#ifdef INTROSPECTION
+//    snprintf(afl->mutation, sizeof(afl->mutation), "%s FLIP_BIT16-%u",
+//             afl->queue_cur->fname, afl->stage_cur);
+//#endif
+//
+//    if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//    ++afl->stage_cur;
+//
+//    *(u16 *)(out_buf + i) ^= 0xFFFF;
+//
+//  }
+//
+//  new_hit_cnt = afl->queued_paths + afl->unique_crashes;
+//
+//  afl->stage_finds[STAGE_FLIP16] += new_hit_cnt - orig_hit_cnt;
+//  afl->stage_cycles[STAGE_FLIP16] += afl->stage_max;
+//
+//  if (len < 4) { goto skip_bitflip; }
+//
+//  /* Four walking bytes. */
+//
+//  afl->stage_name = "bitflip 32/8";
+//  afl->stage_short = "flip32";
+//  afl->stage_cur = 0;
+//  afl->stage_max = len - 3;
+//
+//  orig_hit_cnt = new_hit_cnt;
+//
+//  for (i = 0; i < len - 3; ++i) {
+//
+//    /* Let's consult the effector map... */
+//    if (!eff_map[EFF_APOS(i)] && !eff_map[EFF_APOS(i + 1)] &&
+//        !eff_map[EFF_APOS(i + 2)] && !eff_map[EFF_APOS(i + 3)]) {
+//
+//      --afl->stage_max;
+//      continue;
+//
+//    }
+//
+//    afl->stage_cur_byte = i;
+//
+//    *(u32 *)(out_buf + i) ^= 0xFFFFFFFF;
+//
+//#ifdef INTROSPECTION
+//    snprintf(afl->mutation, sizeof(afl->mutation), "%s FLIP_BIT32-%u",
+//             afl->queue_cur->fname, afl->stage_cur);
+//#endif
+//
+//    if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//    ++afl->stage_cur;
+//
+//    *(u32 *)(out_buf + i) ^= 0xFFFFFFFF;
+//
+//  }
+//
+//  new_hit_cnt = afl->queued_paths + afl->unique_crashes;
+//
+//  afl->stage_finds[STAGE_FLIP32] += new_hit_cnt - orig_hit_cnt;
+//  afl->stage_cycles[STAGE_FLIP32] += afl->stage_max;
+//
+//skip_bitflip:
+//
+//  if (afl->no_arith) { goto skip_arith; }
+//
+//  /**********************
+//   * ARITHMETIC INC/DEC *
+//   **********************/
+//
+//  /* 8-bit arithmetics. */
+//
+//  afl->stage_name = "arith 8/8";
+//  afl->stage_short = "arith8";
+//  afl->stage_cur = 0;
+//  afl->stage_max = 2 * len * ARITH_MAX;
+//
+//  afl->stage_val_type = STAGE_VAL_LE;
+//
+//  orig_hit_cnt = new_hit_cnt;
+//
+//  for (i = 0; i < (u32)len; ++i) {
+//
+//    u8 orig = out_buf[i];
+//
+//    /* Let's consult the effector map... */
+//
+//    if (!eff_map[EFF_APOS(i)]) {
+//
+//      afl->stage_max -= 2 * ARITH_MAX;
+//      continue;
+//
+//    }
+//
+//    afl->stage_cur_byte = i;
+//
+//    for (j = 1; j <= ARITH_MAX; ++j) {
+//
+//      u8 r = orig ^ (orig + j);
+//
+//      /* Do arithmetic operations only if the result couldn't be a product
+//         of a bitflip. */
+//
+//      if (!could_be_bitflip(r)) {
+//
+//        afl->stage_cur_val = j;
+//        out_buf[i] = orig + j;
+//
+//#ifdef INTROSPECTION
+//        snprintf(afl->mutation, sizeof(afl->mutation), "%s ARITH8+-%u-%u",
+//                 afl->queue_cur->fname, i, j);
+//#endif
+//
+//        if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//        ++afl->stage_cur;
+//
+//      } else {
+//
+//        --afl->stage_max;
+//
+//      }
+//
+//      r = orig ^ (orig - j);
+//
+//      if (!could_be_bitflip(r)) {
+//
+//        afl->stage_cur_val = -j;
+//        out_buf[i] = orig - j;
+//
+//#ifdef INTROSPECTION
+//        snprintf(afl->mutation, sizeof(afl->mutation), "%s ARITH8--%u-%u",
+//                 afl->queue_cur->fname, i, j);
+//#endif
+//
+//        if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//        ++afl->stage_cur;
+//
+//      } else {
+//
+//        --afl->stage_max;
+//
+//      }
+//
+//      out_buf[i] = orig;
+//
+//    }
+//
+//  }
+//
+//  new_hit_cnt = afl->queued_paths + afl->unique_crashes;
+//
+//  afl->stage_finds[STAGE_ARITH8] += new_hit_cnt - orig_hit_cnt;
+//  afl->stage_cycles[STAGE_ARITH8] += afl->stage_max;
+//
+//  /* 16-bit arithmetics, both endians. */
+//
+//  if (len < 2) { goto skip_arith; }
+//
+//  afl->stage_name = "arith 16/8";
+//  afl->stage_short = "arith16";
+//  afl->stage_cur = 0;
+//  afl->stage_max = 4 * (len - 1) * ARITH_MAX;
+//
+//  orig_hit_cnt = new_hit_cnt;
+//
+//  for (i = 0; i < (u32)len - 1; ++i) {
+//
+//    u16 orig = *(u16 *)(out_buf + i);
+//
+//    /* Let's consult the effector map... */
+//
+//    if (!eff_map[EFF_APOS(i)] && !eff_map[EFF_APOS(i + 1)]) {
+//
+//      afl->stage_max -= 4 * ARITH_MAX;
+//      continue;
+//
+//    }
+//
+//    afl->stage_cur_byte = i;
+//
+//    for (j = 1; j <= ARITH_MAX; ++j) {
+//
+//      u16 r1 = orig ^ (orig + j), r2 = orig ^ (orig - j),
+//          r3 = orig ^ SWAP16(SWAP16(orig) + j),
+//          r4 = orig ^ SWAP16(SWAP16(orig) - j);
+//
+//      /* Try little endian addition and subtraction first. Do it only
+//         if the operation would affect more than one byte (hence the
+//         & 0xff overflow checks) and if it couldn't be a product of
+//         a bitflip. */
+//
+//      afl->stage_val_type = STAGE_VAL_LE;
+//
+//      if ((orig & 0xff) + j > 0xff && !could_be_bitflip(r1)) {
+//
+//        afl->stage_cur_val = j;
+//        *(u16 *)(out_buf + i) = orig + j;
+//
+//#ifdef INTROSPECTION
+//        snprintf(afl->mutation, sizeof(afl->mutation), "%s ARITH16+-%u-%u",
+//                 afl->queue_cur->fname, i, j);
+//#endif
+//
+//        if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//        ++afl->stage_cur;
+//
+//      } else {
+//
+//        --afl->stage_max;
+//
+//      }
+//
+//      if ((orig & 0xff) < j && !could_be_bitflip(r2)) {
+//
+//        afl->stage_cur_val = -j;
+//        *(u16 *)(out_buf + i) = orig - j;
+//
+//#ifdef INTROSPECTION
+//        snprintf(afl->mutation, sizeof(afl->mutation), "%s ARITH16--%u-%u",
+//                 afl->queue_cur->fname, i, j);
+//#endif
+//
+//        if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//        ++afl->stage_cur;
+//
+//      } else {
+//
+//        --afl->stage_max;
+//
+//      }
+//
+//      /* Big endian comes next. Same deal. */
+//
+//      afl->stage_val_type = STAGE_VAL_BE;
+//
+//      if ((orig >> 8) + j > 0xff && !could_be_bitflip(r3)) {
+//
+//        afl->stage_cur_val = j;
+//        *(u16 *)(out_buf + i) = SWAP16(SWAP16(orig) + j);
+//
+//#ifdef INTROSPECTION
+//        snprintf(afl->mutation, sizeof(afl->mutation), "%s ARITH16+BE-%u-%u",
+//                 afl->queue_cur->fname, i, j);
+//#endif
+//
+//        if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//        ++afl->stage_cur;
+//
+//      } else {
+//
+//        --afl->stage_max;
+//
+//      }
+//
+//      if ((orig >> 8) < j && !could_be_bitflip(r4)) {
+//
+//        afl->stage_cur_val = -j;
+//        *(u16 *)(out_buf + i) = SWAP16(SWAP16(orig) - j);
+//
+//#ifdef INTROSPECTION
+//        snprintf(afl->mutation, sizeof(afl->mutation), "%s ARITH16_BE-%u-%u",
+//                 afl->queue_cur->fname, i, j);
+//#endif
+//
+//        if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//        ++afl->stage_cur;
+//
+//      } else {
+//
+//        --afl->stage_max;
+//
+//      }
+//
+//      *(u16 *)(out_buf + i) = orig;
+//
+//    }
+//
+//  }
+//
+//  new_hit_cnt = afl->queued_paths + afl->unique_crashes;
+//
+//  afl->stage_finds[STAGE_ARITH16] += new_hit_cnt - orig_hit_cnt;
+//  afl->stage_cycles[STAGE_ARITH16] += afl->stage_max;
+//
+//  /* 32-bit arithmetics, both endians. */
+//
+//  if (len < 4) { goto skip_arith; }
+//
+//  afl->stage_name = "arith 32/8";
+//  afl->stage_short = "arith32";
+//  afl->stage_cur = 0;
+//  afl->stage_max = 4 * (len - 3) * ARITH_MAX;
+//
+//  orig_hit_cnt = new_hit_cnt;
+//
+//  for (i = 0; i < (u32)len - 3; ++i) {
+//
+//    u32 orig = *(u32 *)(out_buf + i);
+//
+//    /* Let's consult the effector map... */
+//
+//    if (!eff_map[EFF_APOS(i)] && !eff_map[EFF_APOS(i + 1)] &&
+//        !eff_map[EFF_APOS(i + 2)] && !eff_map[EFF_APOS(i + 3)]) {
+//
+//      afl->stage_max -= 4 * ARITH_MAX;
+//      continue;
+//
+//    }
+//
+//    afl->stage_cur_byte = i;
+//
+//    for (j = 1; j <= ARITH_MAX; ++j) {
+//
+//      u32 r1 = orig ^ (orig + j), r2 = orig ^ (orig - j),
+//          r3 = orig ^ SWAP32(SWAP32(orig) + j),
+//          r4 = orig ^ SWAP32(SWAP32(orig) - j);
+//
+//      /* Little endian first. Same deal as with 16-bit: we only want to
+//         try if the operation would have effect on more than two bytes. */
+//
+//      afl->stage_val_type = STAGE_VAL_LE;
+//
+//      if ((orig & 0xffff) + j > 0xffff && !could_be_bitflip(r1)) {
+//
+//        afl->stage_cur_val = j;
+//        *(u32 *)(out_buf + i) = orig + j;
+//
+//#ifdef INTROSPECTION
+//        snprintf(afl->mutation, sizeof(afl->mutation), "%s ARITH32+-%u-%u",
+//                 afl->queue_cur->fname, i, j);
+//#endif
+//
+//        if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//        ++afl->stage_cur;
+//
+//      } else {
+//
+//        --afl->stage_max;
+//
+//      }
+//
+//      if ((orig & 0xffff) < (u32)j && !could_be_bitflip(r2)) {
+//
+//        afl->stage_cur_val = -j;
+//        *(u32 *)(out_buf + i) = orig - j;
+//
+//#ifdef INTROSPECTION
+//        snprintf(afl->mutation, sizeof(afl->mutation), "%s ARITH32_-%u-%u",
+//                 afl->queue_cur->fname, i, j);
+//#endif
+//
+//        if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//        ++afl->stage_cur;
+//
+//      } else {
+//
+//        --afl->stage_max;
+//
+//      }
+//
+//      /* Big endian next. */
+//
+//      afl->stage_val_type = STAGE_VAL_BE;
+//
+//      if ((SWAP32(orig) & 0xffff) + j > 0xffff && !could_be_bitflip(r3)) {
+//
+//        afl->stage_cur_val = j;
+//        *(u32 *)(out_buf + i) = SWAP32(SWAP32(orig) + j);
+//
+//#ifdef INTROSPECTION
+//        snprintf(afl->mutation, sizeof(afl->mutation), "%s ARITH32+BE-%u-%u",
+//                 afl->queue_cur->fname, i, j);
+//#endif
+//
+//        if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//        ++afl->stage_cur;
+//
+//      } else {
+//
+//        --afl->stage_max;
+//
+//      }
+//
+//      if ((SWAP32(orig) & 0xffff) < (u32)j && !could_be_bitflip(r4)) {
+//
+//        afl->stage_cur_val = -j;
+//        *(u32 *)(out_buf + i) = SWAP32(SWAP32(orig) - j);
+//
+//#ifdef INTROSPECTION
+//        snprintf(afl->mutation, sizeof(afl->mutation), "%s ARITH32_BE-%u-%u",
+//                 afl->queue_cur->fname, i, j);
+//#endif
+//
+//        if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//        ++afl->stage_cur;
+//
+//      } else {
+//
+//        --afl->stage_max;
+//
+//      }
+//
+//      *(u32 *)(out_buf + i) = orig;
+//
+//    }
+//
+//  }
+//
+//  new_hit_cnt = afl->queued_paths + afl->unique_crashes;
+//
+//  afl->stage_finds[STAGE_ARITH32] += new_hit_cnt - orig_hit_cnt;
+//  afl->stage_cycles[STAGE_ARITH32] += afl->stage_max;
+//
+//skip_arith:
+//
+//  /**********************
+//   * INTERESTING VALUES *
+//   **********************/
+//
+//  afl->stage_name = "interest 8/8";
+//  afl->stage_short = "int8";
+//  afl->stage_cur = 0;
+//  afl->stage_max = len * sizeof(interesting_8);
+//
+//  afl->stage_val_type = STAGE_VAL_LE;
+//
+//  orig_hit_cnt = new_hit_cnt;
+//
+//  /* Setting 8-bit integers. */
+//
+//  for (i = 0; i < (u32)len; ++i) {
+//
+//    u8 orig = out_buf[i];
+//
+//    /* Let's consult the effector map... */
+//
+//    if (!eff_map[EFF_APOS(i)]) {
+//
+//      afl->stage_max -= sizeof(interesting_8);
+//      continue;
+//
+//    }
+//
+//    afl->stage_cur_byte = i;
+//
+//    for (j = 0; j < (u32)sizeof(interesting_8); ++j) {
+//
+//      /* Skip if the value could be a product of bitflips or arithmetics. */
+//
+//      if (could_be_bitflip(orig ^ (u8)interesting_8[j]) ||
+//          could_be_arith(orig, (u8)interesting_8[j], 1)) {
+//
+//        --afl->stage_max;
+//        continue;
+//
+//      }
+//
+//      afl->stage_cur_val = interesting_8[j];
+//      out_buf[i] = interesting_8[j];
+//
+//#ifdef INTROSPECTION
+//      snprintf(afl->mutation, sizeof(afl->mutation), "%s INTERESTING8_%u_%u",
+//               afl->queue_cur->fname, i, j);
+//#endif
+//
+//      if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//
+//      out_buf[i] = orig;
+//      ++afl->stage_cur;
+//
+//    }
+//
+//  }
+//
+//  new_hit_cnt = afl->queued_paths + afl->unique_crashes;
+//
+//  afl->stage_finds[STAGE_INTEREST8] += new_hit_cnt - orig_hit_cnt;
+//  afl->stage_cycles[STAGE_INTEREST8] += afl->stage_max;
+//
+//  /* Setting 16-bit integers, both endians. */
+//
+//  if (afl->no_arith || len < 2) { goto skip_interest; }
+//
+//  afl->stage_name = "interest 16/8";
+//  afl->stage_short = "int16";
+//  afl->stage_cur = 0;
+//  afl->stage_max = 2 * (len - 1) * (sizeof(interesting_16) >> 1);
+//
+//  orig_hit_cnt = new_hit_cnt;
+//
+//  for (i = 0; i < len - 1; ++i) {
+//
+//    u16 orig = *(u16 *)(out_buf + i);
+//
+//    /* Let's consult the effector map... */
+//
+//    if (!eff_map[EFF_APOS(i)] && !eff_map[EFF_APOS(i + 1)]) {
+//
+//      afl->stage_max -= sizeof(interesting_16);
+//      continue;
+//
+//    }
+//
+//    afl->stage_cur_byte = i;
+//
+//    for (j = 0; j < sizeof(interesting_16) / 2; ++j) {
+//
+//      afl->stage_cur_val = interesting_16[j];
+//
+//      /* Skip if this could be a product of a bitflip, arithmetics,
+//         or single-byte interesting value insertion. */
+//
+//      if (!could_be_bitflip(orig ^ (u16)interesting_16[j]) &&
+//          !could_be_arith(orig, (u16)interesting_16[j], 2) &&
+//          !could_be_interest(orig, (u16)interesting_16[j], 2, 0)) {
+//
+//        afl->stage_val_type = STAGE_VAL_LE;
+//
+//        *(u16 *)(out_buf + i) = interesting_16[j];
+//
+//#ifdef INTROSPECTION
+//        snprintf(afl->mutation, sizeof(afl->mutation), "%s INTERESTING16_%u_%u",
+//                 afl->queue_cur->fname, i, j);
+//#endif
+//
+//        if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//        ++afl->stage_cur;
+//
+//      } else {
+//
+//        --afl->stage_max;
+//
+//      }
+//
+//      if ((u16)interesting_16[j] != SWAP16(interesting_16[j]) &&
+//          !could_be_bitflip(orig ^ SWAP16(interesting_16[j])) &&
+//          !could_be_arith(orig, SWAP16(interesting_16[j]), 2) &&
+//          !could_be_interest(orig, SWAP16(interesting_16[j]), 2, 1)) {
+//
+//        afl->stage_val_type = STAGE_VAL_BE;
+//
+//#ifdef INTROSPECTION
+//        snprintf(afl->mutation, sizeof(afl->mutation),
+//                 "%s INTERESTING16BE_%u_%u", afl->queue_cur->fname, i, j);
+//#endif
+//
+//        *(u16 *)(out_buf + i) = SWAP16(interesting_16[j]);
+//        if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//        ++afl->stage_cur;
+//
+//      } else {
+//
+//        --afl->stage_max;
+//
+//      }
+//
+//    }
+//
+//    *(u16 *)(out_buf + i) = orig;
+//
+//  }
+//
+//  new_hit_cnt = afl->queued_paths + afl->unique_crashes;
+//
+//  afl->stage_finds[STAGE_INTEREST16] += new_hit_cnt - orig_hit_cnt;
+//  afl->stage_cycles[STAGE_INTEREST16] += afl->stage_max;
+//
+//  if (len < 4) { goto skip_interest; }
+//
+//  /* Setting 32-bit integers, both endians. */
+//
+//  afl->stage_name = "interest 32/8";
+//  afl->stage_short = "int32";
+//  afl->stage_cur = 0;
+//  afl->stage_max = 2 * (len - 3) * (sizeof(interesting_32) >> 2);
+//
+//  orig_hit_cnt = new_hit_cnt;
+//
+//  for (i = 0; i < len - 3; i++) {
+//
+//    u32 orig = *(u32 *)(out_buf + i);
+//
+//    /* Let's consult the effector map... */
+//
+//    if (!eff_map[EFF_APOS(i)] && !eff_map[EFF_APOS(i + 1)] &&
+//        !eff_map[EFF_APOS(i + 2)] && !eff_map[EFF_APOS(i + 3)]) {
+//
+//      afl->stage_max -= sizeof(interesting_32) >> 1;
+//      continue;
+//
+//    }
+//
+//    afl->stage_cur_byte = i;
+//
+//    for (j = 0; j < sizeof(interesting_32) / 4; ++j) {
+//
+//      afl->stage_cur_val = interesting_32[j];
+//
+//      /* Skip if this could be a product of a bitflip, arithmetics,
+//         or word interesting value insertion. */
+//
+//      if (!could_be_bitflip(orig ^ (u32)interesting_32[j]) &&
+//          !could_be_arith(orig, interesting_32[j], 4) &&
+//          !could_be_interest(orig, interesting_32[j], 4, 0)) {
+//
+//        afl->stage_val_type = STAGE_VAL_LE;
+//
+//        *(u32 *)(out_buf + i) = interesting_32[j];
+//
+//#ifdef INTROSPECTION
+//        snprintf(afl->mutation, sizeof(afl->mutation), "%s INTERESTING32_%u_%u",
+//                 afl->queue_cur->fname, i, j);
+//#endif
+//
+//        if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//        ++afl->stage_cur;
+//
+//      } else {
+//
+//        --afl->stage_max;
+//
+//      }
+//
+//      if ((u32)interesting_32[j] != SWAP32(interesting_32[j]) &&
+//          !could_be_bitflip(orig ^ SWAP32(interesting_32[j])) &&
+//          !could_be_arith(orig, SWAP32(interesting_32[j]), 4) &&
+//          !could_be_interest(orig, SWAP32(interesting_32[j]), 4, 1)) {
+//
+//        afl->stage_val_type = STAGE_VAL_BE;
+//
+//#ifdef INTROSPECTION
+//        snprintf(afl->mutation, sizeof(afl->mutation),
+//                 "%s INTERESTING32BE_%u_%u", afl->queue_cur->fname, i, j);
+//#endif
+//
+//        *(u32 *)(out_buf + i) = SWAP32(interesting_32[j]);
+//        if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//        ++afl->stage_cur;
+//
+//      } else {
+//
+//        --afl->stage_max;
+//
+//      }
+//
+//    }
+//
+//    *(u32 *)(out_buf + i) = orig;
+//
+//  }
+//
+//  new_hit_cnt = afl->queued_paths + afl->unique_crashes;
+//
+//  afl->stage_finds[STAGE_INTEREST32] += new_hit_cnt - orig_hit_cnt;
+//  afl->stage_cycles[STAGE_INTEREST32] += afl->stage_max;
+//
+//skip_interest:
+//
+//  /********************
+//   * DICTIONARY STUFF *
+//   ********************/
+//
+//  if (!afl->extras_cnt) { goto skip_user_extras; }
+//
+//  /* Overwrite with user-supplied extras. */
+//
+//  afl->stage_name = "user extras (over)";
+//  afl->stage_short = "ext_UO";
+//  afl->stage_cur = 0;
+//  afl->stage_max = afl->extras_cnt * len;
+//
+//  afl->stage_val_type = STAGE_VAL_NONE;
+//
+//  orig_hit_cnt = new_hit_cnt;
+//
+//  for (i = 0; i < (u32)len; ++i) {
+//
+//    u32 last_len = 0;
+//
+//    afl->stage_cur_byte = i;
+//
+//    /* Extras are sorted by size, from smallest to largest. This means
+//       that we don't have to worry about restoring the buffer in
+//       between writes at a particular offset determined by the outer
+//       loop. */
+//
+//    for (j = 0; j < afl->extras_cnt; ++j) {
+//
+//      /* Skip extras probabilistically if afl->extras_cnt > AFL_MAX_DET_EXTRAS.
+//         Also skip them if there's no room to insert the payload, if the token
+//         is redundant, or if its entire span has no bytes set in the effector
+//         map. */
+//
+//      if ((afl->extras_cnt > afl->max_det_extras &&
+//           rand_below(afl, afl->extras_cnt) >= afl->max_det_extras) ||
+//          afl->extras[j].len > len - i ||
+//          !memcmp(afl->extras[j].data, out_buf + i, afl->extras[j].len) ||
+//          !memchr(eff_map + EFF_APOS(i), 1,
+//                  EFF_SPAN_ALEN(i, afl->extras[j].len))) {
+//
+//        --afl->stage_max;
+//        continue;
+//
+//      }
+//
+//      last_len = afl->extras[j].len;
+//      memcpy(out_buf + i, afl->extras[j].data, last_len);
+//
+//#ifdef INTROSPECTION
+//      snprintf(afl->mutation, sizeof(afl->mutation),
+//               "%s EXTRAS_overwrite-%u-%u", afl->queue_cur->fname, i, j);
+//#endif
+//
+//      if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//
+//      ++afl->stage_cur;
+//
+//    }
+//
+//    /* Restore all the clobbered memory. */
+//    memcpy(out_buf + i, in_buf + i, last_len);
+//
+//  }
+//
+//  new_hit_cnt = afl->queued_paths + afl->unique_crashes;
+//
+//  afl->stage_finds[STAGE_EXTRAS_UO] += new_hit_cnt - orig_hit_cnt;
+//  afl->stage_cycles[STAGE_EXTRAS_UO] += afl->stage_max;
+//
+//  /* Insertion of user-supplied extras. */
+//
+//  afl->stage_name = "user extras (insert)";
+//  afl->stage_short = "ext_UI";
+//  afl->stage_cur = 0;
+//  afl->stage_max = afl->extras_cnt * (len + 1);
+//
+//  orig_hit_cnt = new_hit_cnt;
+//
+//  ex_tmp = afl_realloc(AFL_BUF_PARAM(ex), len + MAX_DICT_FILE);
+//  if (unlikely(!ex_tmp)) { PFATAL("alloc"); }
+//
+//  for (i = 0; i <= (u32)len; ++i) {
+//
+//    afl->stage_cur_byte = i;
+//
+//    for (j = 0; j < afl->extras_cnt; ++j) {
+//
+//      if (len + afl->extras[j].len > MAX_FILE) {
+//
+//        --afl->stage_max;
+//        continue;
+//
+//      }
+//
+//      /* Insert token */
+//      memcpy(ex_tmp + i, afl->extras[j].data, afl->extras[j].len);
+//
+//      /* Copy tail */
+//      memcpy(ex_tmp + i + afl->extras[j].len, out_buf + i, len - i);
+//
+//#ifdef INTROSPECTION
+//      snprintf(afl->mutation, sizeof(afl->mutation), "%s EXTRAS_insert-%u-%u",
+//               afl->queue_cur->fname, i, j);
+//#endif
+//
+//      if (common_fuzz_stuff(afl, ex_tmp, len + afl->extras[j].len)) {
+//
+//        goto abandon_entry;
+//
+//      }
+//
+//      ++afl->stage_cur;
+//
+//    }
+//
+//    /* Copy head */
+//    ex_tmp[i] = out_buf[i];
+//
+//  }
+//
+//  new_hit_cnt = afl->queued_paths + afl->unique_crashes;
+//
+//  afl->stage_finds[STAGE_EXTRAS_UI] += new_hit_cnt - orig_hit_cnt;
+//  afl->stage_cycles[STAGE_EXTRAS_UI] += afl->stage_max;
+//
+//skip_user_extras:
+//
+//  if (!afl->a_extras_cnt) { goto skip_extras; }
+//
+//  afl->stage_name = "auto extras (over)";
+//  afl->stage_short = "ext_AO";
+//  afl->stage_cur = 0;
+//  afl->stage_max = MIN(afl->a_extras_cnt, (u32)USE_AUTO_EXTRAS) * len;
+//
+//  afl->stage_val_type = STAGE_VAL_NONE;
+//
+//  orig_hit_cnt = new_hit_cnt;
+//
+//  for (i = 0; i < (u32)len; ++i) {
+//
+//    u32 last_len = 0;
+//
+//    afl->stage_cur_byte = i;
+//
+//    u32 min_extra_len = MIN(afl->a_extras_cnt, (u32)USE_AUTO_EXTRAS);
+//    for (j = 0; j < min_extra_len; ++j) {
+//
+//      /* See the comment in the earlier code; extras are sorted by size. */
+//
+//      if (afl->a_extras[j].len > len - i ||
+//          !memcmp(afl->a_extras[j].data, out_buf + i, afl->a_extras[j].len) ||
+//          !memchr(eff_map + EFF_APOS(i), 1,
+//                  EFF_SPAN_ALEN(i, afl->a_extras[j].len))) {
+//
+//        --afl->stage_max;
+//        continue;
+//
+//      }
+//
+//      last_len = afl->a_extras[j].len;
+//      memcpy(out_buf + i, afl->a_extras[j].data, last_len);
+//
+//#ifdef INTROSPECTION
+//      snprintf(afl->mutation, sizeof(afl->mutation),
+//               "%s AUTO_EXTRAS_overwrite-%u-%u", afl->queue_cur->fname, i, j);
+//#endif
+//
+//      if (common_fuzz_stuff(afl, out_buf, len)) { goto abandon_entry; }
+//
+//      ++afl->stage_cur;
+//
+//    }
+//
+//    /* Restore all the clobbered memory. */
+//    memcpy(out_buf + i, in_buf + i, last_len);
+//
+//  }
+//
+//  new_hit_cnt = afl->queued_paths + afl->unique_crashes;
+//
+//  afl->stage_finds[STAGE_EXTRAS_AO] += new_hit_cnt - orig_hit_cnt;
+//  afl->stage_cycles[STAGE_EXTRAS_AO] += afl->stage_max;
+//
+//skip_extras:
+//
+//  /* If we made this to here without jumping to havoc_stage or abandon_entry,
+//     we're properly done with deterministic steps and can mark it as such
+//     in the .state/ directory. */
+//
+//  if (!afl->queue_cur->passed_det) { mark_as_det_done(afl, afl->queue_cur); }
+
+custom_mutator_stage:
+  /*******************
+   * CUSTOM MUTATORS *
+   *******************/
+
+  if (likely(!afl->custom_mutators_count)) { goto havoc_stage; }
+
+  if (afl->fsrv.leakage_hunting) {
+    FATAL("Custom mutators not implemented for leakage");
+  }
+//
+//  afl->stage_name = "custom mutator";
+//  afl->stage_short = "custom";
+//  afl->stage_max = HAVOC_CYCLES * perf_score / afl->havoc_div / 100;
+//  afl->stage_val_type = STAGE_VAL_NONE;
+//  bool has_custom_fuzz = false;
+//
+//  if (afl->stage_max < HAVOC_MIN) { afl->stage_max = HAVOC_MIN; }
+//
+//  const u32 max_seed_size = MAX_FILE, saved_max = afl->stage_max;
+//
+//  orig_hit_cnt = afl->queued_paths + afl->unique_crashes;
+//
+//#ifdef INTROSPECTION
+//  afl->mutation[0] = 0;
+//#endif
+//
+//  LIST_FOREACH(&afl->custom_mutator_list, struct custom_mutator, {
+//
+//    if (el->afl_custom_fuzz) {
+//
+//      afl->current_custom_fuzz = el;
+//
+//      if (el->afl_custom_fuzz_count) {
+//
+//        afl->stage_max = el->afl_custom_fuzz_count(el->data, out_buf, len);
+//
+//      } else {
+//
+//        afl->stage_max = saved_max;
+//
+//      }
+//
+//      has_custom_fuzz = true;
+//
+//      afl->stage_short = el->name_short;
+//
+//      if (afl->stage_max) {
+//
+//        for (afl->stage_cur = 0; afl->stage_cur < afl->stage_max;
+//             ++afl->stage_cur) {
+//
+//          struct queue_entry *target = NULL;
+//          u32                 tid;
+//          u8 *                new_buf = NULL;
+//          u32                 target_len = 0;
+//
+//          /* check if splicing makes sense yet (enough entries) */
+//          if (likely(afl->ready_for_splicing_count > 1)) {
+//
+//            /* Pick a random other queue entry for passing to external API
+//               that has the necessary length */
+//
+//            do {
+//
+//              tid = rand_below(afl, afl->queued_paths);
+//
+//            } while (unlikely(tid == afl->current_entry ||
+//
+//                              afl->queue_buf[tid]->len < 4));
+//
+//            target = afl->queue_buf[tid];
+//            afl->splicing_with = tid;
+//
+//            /* Read the additional testcase into a new buffer. */
+//            new_buf = queue_testcase_get(afl, target);
+//            target_len = target->len;
+//
+//          }
+//
+//          u8 *mutated_buf = NULL;
+//
+//          size_t mutated_size =
+//              el->afl_custom_fuzz(el->data, out_buf, len, &mutated_buf, new_buf,
+//                                  target_len, max_seed_size);
+//
+//          if (unlikely(!mutated_buf)) {
+//
+//            FATAL("Error in custom_fuzz. Size returned: %zu", mutated_size);
+//
+//          }
+//
+//          if (mutated_size > 0) {
+//
+//            if (common_fuzz_stuff(afl, mutated_buf, (u32)mutated_size)) {
+//
+//              goto abandon_entry;
+//
+//            }
+//
+//            if (!el->afl_custom_fuzz_count) {
+//
+//              /* If we're finding new stuff, let's run for a bit longer, limits
+//                permitting. */
+//
+//              if (afl->queued_paths != havoc_queued) {
+//
+//                if (perf_score <= afl->havoc_max_mult * 100) {
+//
+//                  afl->stage_max *= 2;
+//                  perf_score *= 2;
+//
+//                }
+//
+//                havoc_queued = afl->queued_paths;
+//
+//              }
+//
+//            }
+//
+//          }
+//
+//          /* `(afl->)out_buf` may have been changed by the call to custom_fuzz
+//           */
+//          /* TODO: Only do this when `mutated_buf` == `out_buf`? Branch vs
+//           * Memcpy.
+//           */
+//          memcpy(out_buf, in_buf, len);
+//
+//        }
+//
+//      }
+//
+//    }
+//
+//  });
+//
+//  afl->current_custom_fuzz = NULL;
+//
+//  if (!has_custom_fuzz) goto havoc_stage;
+//
+//  new_hit_cnt = afl->queued_paths + afl->unique_crashes;
+//
+//  afl->stage_finds[STAGE_CUSTOM_MUTATOR] += new_hit_cnt - orig_hit_cnt;
+//  afl->stage_cycles[STAGE_CUSTOM_MUTATOR] += afl->stage_max;
+//
+//  if (likely(afl->custom_only)) {
+//
+//    /* Skip other stages */
+//    ret_val = 0;
+//    goto abandon_entry;
+//
+//  }
+
+  /****************
+   * RANDOM HAVOC *
+   ****************/
+
+havoc_stage:
+
+  afl->stage_cur_byte = -1;
+
+  /* The havoc stage mutation code is also invoked when splicing files; if the
+     splice_cycle variable is set, generate different descriptions and such. */
+
+  if (!splice_cycle) {
+
+    afl->stage_name = "havoc";
+    afl->stage_short = "havoc";
+    afl->stage_max = (doing_det ? HAVOC_CYCLES_INIT : HAVOC_CYCLES) *
+                     perf_score / afl->havoc_div / 100;
+
+  } else {
+
+    perf_score = orig_perf;
+
+    snprintf(afl->stage_name_buf, STAGE_BUF_SIZE, "splice %u", splice_cycle);
+    afl->stage_name = afl->stage_name_buf;
+    afl->stage_short = "splice";
+    afl->stage_max = SPLICE_HAVOC * perf_score / afl->havoc_div / 100;
+
+  }
+
+  if (afl->stage_max < HAVOC_MIN) { afl->stage_max = HAVOC_MIN; }
+
+  temp_len = len;
+
+  orig_hit_cnt = afl->queued_paths + afl->unique_crashes;
+
+  havoc_queued = afl->queued_paths;
+
+  if (afl->custom_mutators_count) {
+
+    LIST_FOREACH(&afl->custom_mutator_list, struct custom_mutator, {
+
+      if (el->stacked_custom && el->afl_custom_havoc_mutation_probability) {
+
+        el->stacked_custom_prob =
+            el->afl_custom_havoc_mutation_probability(el->data);
+        if (el->stacked_custom_prob > 100) {
+
+          FATAL(
+              "The probability returned by "
+              "afl_custom_havoc_mutation_propability "
+              "has to be in the range 0-100.");
+
+        }
+
+      }
+
+    });
+
+  }
+
+  /* We essentially just do several thousand runs (depending on perf_score)
+     where we take the input file and make random stacked tweaks. */
+
+#define MAX_HAVOC_ENTRY 59                                      /* 55 to 60 */
+
+  u32 r_max, r;
+
+  r_max = (MAX_HAVOC_ENTRY + 1) + (afl->extras_cnt ? 4 : 0) +
+          (afl->a_extras_cnt ? 4 : 0);
+
+  if (unlikely(afl->expand_havoc && afl->ready_for_splicing_count > 1)) {
+
+    /* add expensive havoc cases here, they are activated after a full
+       cycle without finds happened */
+
+    r_max += 4;
+
+  }
+
+  if (unlikely(get_cur_time() - afl->last_path_time > 5000 /* 5 seconds */ &&
+               afl->ready_for_splicing_count > 1)) {
+
+    /* add expensive havoc cases here if there is no findings in the last 5s */
+
+    r_max += 4;
+
+  }
+
+  u32 leakage_stages = afl->fsrv.leakage_hunting ? afl->stage_max : 0;
+
+  for (afl->stage_cur = 0; afl->stage_cur < afl->stage_max + leakage_stages; ++afl->stage_cur) {
+
+    if (afl->stage_cur >= afl->stage_max) {
+      leak_fuzz_phase = LEAKAGE_FUZZ_MUTATE_SECRET;
+      printf("In LEAKAGE_FUZZ_MUTATE_SECRET phase\n");
+    }
+
+    u32 temp_public_len = leak_input.mutated_public_len;
+    u32 temp_secret_len = leak_input.mutated_secret_len;
+    u32 temp_combined_len = leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT ?
+                            leak_input.mutated_public_len + leak_input.mutated_secret_len :
+                            leak_input.mutated_secret_len;
+
+    mutate_buf = ck_realloc(mutate_buf, temp_combined_len);
+    if (!mutate_buf) {
+      FATAL("Failed to allocate for mutate_buf (len: %u)", temp_combined_len);
+    }
+
+    if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
+      memcpy(mutate_buf,
+             leak_input.mutated_combined_buf,
+             leak_input.mutated_public_len + leak_input.mutated_secret_len);
+    } else {
+      memcpy(mutate_buf,
+             leak_input.mutated_combined_buf + leak_input.mutated_public_len,
+             leak_input.mutated_secret_len);
+    }
+
+
+    u32 use_stacking = 1 << (1 + rand_below(afl, afl->havoc_stack_pow2));
+
+    afl->stage_cur_val = use_stacking;
+
+#ifdef INTROSPECTION
+    snprintf(afl->mutation, sizeof(afl->mutation), "%s HAVOC-%u",
+             afl->queue_cur->fname, use_stacking);
+#endif
+
+    for (i = 0; i < use_stacking; ++i) {
+
+      if (afl->custom_mutators_count) {
+
+        if (afl->fsrv.leakage_hunting) {
+          FATAL("Custom mutators not implemented for leakage");
+        }
+
+//        LIST_FOREACH(&afl->custom_mutator_list, struct custom_mutator, {
+//
+//          if (el->stacked_custom &&
+//              rand_below(afl, 100) < el->stacked_custom_prob) {
+//
+//            u8 *   custom_havoc_buf = NULL;
+//            size_t new_len = el->afl_custom_havoc_mutation(
+//                el->data, out_buf, temp_len, &custom_havoc_buf, MAX_FILE);
+//            if (unlikely(!custom_havoc_buf)) {
+//
+//              FATAL("Error in custom_havoc (return %zu)", new_len);
+//
+//            }
+//
+//            if (likely(new_len > 0 && custom_havoc_buf)) {
+//
+//              temp_len = new_len;
+//              if (out_buf != custom_havoc_buf) {
+//
+//                out_buf = afl_realloc(AFL_BUF_PARAM(out), temp_len);
+//                if (unlikely(!afl->out_buf)) { PFATAL("alloc"); }
+//                memcpy(out_buf, custom_havoc_buf, temp_len);
+//
+//              }
+//
+//            }
+//
+//          }
+//
+//        });
+
+      }
+
+      switch ((r = rand_below(afl, r_max))) {
+
+        case 0 ... 3: {
+
+          /* Flip a single bit somewhere. Spooky! */
+
+#ifdef INTROSPECTION
+          snprintf(afl->m_tmp, sizeof(afl->m_tmp), " FLIP_BIT1");
+          strcat(afl->mutation, afl->m_tmp);
+#endif
+          FLIP_BIT(mutate_buf, rand_below(afl, temp_combined_len << 3));
+          break;
+
+        }
+
+        case 4 ... 7: {
+
+          /* Set byte to interesting value. */
+
+#ifdef INTROSPECTION
+          snprintf(afl->m_tmp, sizeof(afl->m_tmp), " INTERESTING8");
+          strcat(afl->mutation, afl->m_tmp);
+#endif
+          mutate_buf[rand_below(afl, temp_combined_len)] =
+              interesting_8[rand_below(afl, sizeof(interesting_8))];
+          break;
+
+        }
+
+        case 8 ... 9: {
+
+          /* Set word to interesting value, little endian. */
+
+          if (temp_combined_len < 2) { break; }
+
+#ifdef INTROSPECTION
+          snprintf(afl->m_tmp, sizeof(afl->m_tmp), " INTERESTING16");
+          strcat(afl->mutation, afl->m_tmp);
+#endif
+          *(u16 *)(mutate_buf + rand_below(afl, temp_combined_len - 1)) =
+              interesting_16[rand_below(afl, sizeof(interesting_16) >> 1)];
+
+          break;
+
+        }
+
+        case 10 ... 11: {
+
+          /* Set word to interesting value, big endian. */
+
+          if (temp_combined_len < 2) { break; }
+
+#ifdef INTROSPECTION
+          snprintf(afl->m_tmp, sizeof(afl->m_tmp), " INTERESTING16BE");
+          strcat(afl->mutation, afl->m_tmp);
+#endif
+          *(u16 *)(mutate_buf + rand_below(afl, temp_combined_len - 1)) = SWAP16(
+              interesting_16[rand_below(afl, sizeof(interesting_16) >> 1)]);
+
+          break;
+
+        }
+
+        case 12 ... 13: {
+
+          /* Set dword to interesting value, little endian. */
+
+          if (temp_combined_len < 4) { break; }
+
+#ifdef INTROSPECTION
+          snprintf(afl->m_tmp, sizeof(afl->m_tmp), " INTERESTING32");
+          strcat(afl->mutation, afl->m_tmp);
+#endif
+          *(u32 *)(mutate_buf + rand_below(afl, temp_combined_len - 3)) =
+              interesting_32[rand_below(afl, sizeof(interesting_32) >> 2)];
+
+          break;
+
+        }
+
+        case 14 ... 15: {
+
+          /* Set dword to interesting value, big endian. */
+
+          if (temp_combined_len < 4) { break; }
+
+#ifdef INTROSPECTION
+          snprintf(afl->m_tmp, sizeof(afl->m_tmp), " INTERESTING32BE");
+          strcat(afl->mutation, afl->m_tmp);
+#endif
+          *(u32 *)(mutate_buf + rand_below(afl, temp_combined_len - 3)) = SWAP32(
+              interesting_32[rand_below(afl, sizeof(interesting_32) >> 2)]);
+
+          break;
+
+        }
+
+        case 16 ... 19: {
+
+          /* Randomly subtract from byte. */
+
+#ifdef INTROSPECTION
+          snprintf(afl->m_tmp, sizeof(afl->m_tmp), " ARITH8_");
+          strcat(afl->mutation, afl->m_tmp);
+#endif
+          mutate_buf[rand_below(afl, temp_combined_len)] -= 1 + rand_below(afl, ARITH_MAX);
+          break;
+
+        }
+
+        case 20 ... 23: {
+
+          /* Randomly add to byte. */
+
+#ifdef INTROSPECTION
+          snprintf(afl->m_tmp, sizeof(afl->m_tmp), " ARITH8+");
+          strcat(afl->mutation, afl->m_tmp);
+#endif
+          mutate_buf[rand_below(afl, temp_combined_len)] += 1 + rand_below(afl, ARITH_MAX);
+          break;
+
+        }
+
+        case 24 ... 25: {
+
+          /* Randomly subtract from word, little endian. */
+
+          if (temp_combined_len < 2) { break; }
+
+          u32 pos = rand_below(afl, temp_combined_len - 1);
+
+#ifdef INTROSPECTION
+          snprintf(afl->m_tmp, sizeof(afl->m_tmp), " ARITH16_-%u", pos);
+          strcat(afl->mutation, afl->m_tmp);
+#endif
+          *(u16 *)(mutate_buf + pos) -= 1 + rand_below(afl, ARITH_MAX);
+
+          break;
+
+        }
+
+        case 26 ... 27: {
+
+          /* Randomly subtract from word, big endian. */
+
+          if (temp_combined_len < 2) { break; }
+
+          u32 pos = rand_below(afl, temp_combined_len - 1);
+          u16 num = 1 + rand_below(afl, ARITH_MAX);
+
+#ifdef INTROSPECTION
+          snprintf(afl->m_tmp, sizeof(afl->m_tmp), " ARITH16_BE-%u_%u", pos,
+                   num);
+          strcat(afl->mutation, afl->m_tmp);
+#endif
+          *(u16 *)(mutate_buf + pos) =
+              SWAP16(SWAP16(*(u16 *)(mutate_buf + pos)) - num);
+
+          break;
+
+        }
+
+        case 28 ... 29: {
+
+          /* Randomly add to word, little endian. */
+
+          if (temp_combined_len < 2) { break; }
+
+          u32 pos = rand_below(afl, temp_combined_len - 1);
+
+#ifdef INTROSPECTION
+          snprintf(afl->m_tmp, sizeof(afl->m_tmp), " ARITH16+-%u", pos);
+          strcat(afl->mutation, afl->m_tmp);
+#endif
+          *(u16 *)(mutate_buf + pos) += 1 + rand_below(afl, ARITH_MAX);
+
+          break;
+
+        }
+
+        case 30 ... 31: {
+
+          /* Randomly add to word, big endian. */
+
+          if (temp_combined_len < 2) { break; }
+
+          u32 pos = rand_below(afl, temp_combined_len - 1);
+          u16 num = 1 + rand_below(afl, ARITH_MAX);
+
+#ifdef INTROSPECTION
+          snprintf(afl->m_tmp, sizeof(afl->m_tmp), " ARITH16+BE-%u_%u", pos,
+                   num);
+          strcat(afl->mutation, afl->m_tmp);
+#endif
+          *(u16 *)(mutate_buf + pos) =
+              SWAP16(SWAP16(*(u16 *)(mutate_buf + pos)) + num);
+
+          break;
+
+        }
+
+        case 32 ... 33: {
+
+          /* Randomly subtract from dword, little endian. */
+
+          if (temp_combined_len < 4) { break; }
+
+          u32 pos = rand_below(afl, temp_combined_len - 3);
+
+#ifdef INTROSPECTION
+          snprintf(afl->m_tmp, sizeof(afl->m_tmp), " ARITH32_-%u", pos);
+          strcat(afl->mutation, afl->m_tmp);
+#endif
+          *(u32 *)(mutate_buf + pos) -= 1 + rand_below(afl, ARITH_MAX);
+
+          break;
+
+        }
+
+        case 34 ... 35: {
+
+          /* Randomly subtract from dword, big endian. */
+
+          if (temp_combined_len < 4) { break; }
+
+          u32 pos = rand_below(afl, temp_combined_len - 3);
+          u32 num = 1 + rand_below(afl, ARITH_MAX);
+
+#ifdef INTROSPECTION
+          snprintf(afl->m_tmp, sizeof(afl->m_tmp), " ARITH32_BE-%u-%u", pos,
+                   num);
+          strcat(afl->mutation, afl->m_tmp);
+#endif
+          *(u32 *)(mutate_buf + pos) =
+              SWAP32(SWAP32(*(u32 *)(mutate_buf + pos)) - num);
+
+          break;
+
+        }
+
+        case 36 ... 37: {
+
+          /* Randomly add to dword, little endian. */
+
+          if (temp_combined_len < 4) { break; }
+
+          u32 pos = rand_below(afl, temp_combined_len - 3);
+
+#ifdef INTROSPECTION
+          snprintf(afl->m_tmp, sizeof(afl->m_tmp), " ARITH32+-%u", pos);
+          strcat(afl->mutation, afl->m_tmp);
+#endif
+          *(u32 *)(mutate_buf + pos) += 1 + rand_below(afl, ARITH_MAX);
+
+          break;
+
+        }
+
+        case 38 ... 39: {
+
+          /* Randomly add to dword, big endian. */
+
+          if (temp_combined_len < 4) { break; }
+
+          u32 pos = rand_below(afl, temp_combined_len - 3);
+          u32 num = 1 + rand_below(afl, ARITH_MAX);
+
+#ifdef INTROSPECTION
+          snprintf(afl->m_tmp, sizeof(afl->m_tmp), " ARITH32+BE-%u-%u", pos,
+                   num);
+          strcat(afl->mutation, afl->m_tmp);
+#endif
+          *(u32 *)(mutate_buf + pos) =
+              SWAP32(SWAP32(*(u32 *)(mutate_buf + pos)) + num);
+
+          break;
+
+        }
+
+        case 40 ... 43: {
+
+          /* Just set a random byte to a random value. Because,
+             why not. We use XOR with 1-255 to eliminate the
+             possibility of a no-op. */
+
+#ifdef INTROSPECTION
+          snprintf(afl->m_tmp, sizeof(afl->m_tmp), " RAND8");
+          strcat(afl->mutation, afl->m_tmp);
+#endif
+          mutate_buf[rand_below(afl, temp_combined_len)] ^= 1 + rand_below(afl, 255);
+          break;
+
+        }
+
+        case 44 ... 46: {
+
+          if (temp_combined_len + HAVOC_BLK_XL < MAX_FILE) {
+
+            /* Clone bytes. */
+
+            u32 clone_len = choose_block_len(afl, temp_combined_len);
+            u32 clone_from = rand_below(afl, temp_combined_len - clone_len + 1);
+            u32 clone_to = rand_below(afl, temp_combined_len);
+
+#ifdef INTROSPECTION
+            snprintf(afl->m_tmp, sizeof(afl->m_tmp), " CLONE-%s-%u-%u-%u",
+                     "clone", clone_from, clone_to, clone_len);
+            strcat(afl->mutation, afl->m_tmp);
+#endif
+            u8 *new_buf = ck_realloc(leakage_scratch_buf, temp_combined_len + clone_len);
+            if (unlikely(!new_buf)) { PFATAL("alloc"); }
+
+            /* Head */
+
+            memcpy(new_buf, mutate_buf, clone_to);
+
+            /* Inserted part */
+
+            memcpy(new_buf + clone_to, mutate_buf + clone_from, clone_len);
+
+            /* Tail */
+            memcpy(new_buf + clone_to + clone_len, mutate_buf + clone_to,
+                   temp_combined_len - clone_to);
+
+            u8 *tmp = mutate_buf;
+            mutate_buf = new_buf;
+            leakage_scratch_buf = tmp;
+
+            if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
+              if (clone_to < leak_input.mutated_public_len) {
+                temp_public_len += clone_len;
+              } else {
+                temp_secret_len += clone_len;
+              }
+            }  else {
+              temp_secret_len += clone_len;
+            }
+
+            temp_combined_len += clone_len;
+
+          }
+
+          break;
+
+        }
+
+        case 47: {
+
+          if (temp_combined_len + HAVOC_BLK_XL < MAX_FILE) {
+
+            /* Insert a block of constant bytes (25%). */
+
+            u32 clone_len = choose_block_len(afl, HAVOC_BLK_XL);
+            u32 clone_to = rand_below(afl, temp_combined_len);
+
+#ifdef INTROSPECTION
+            snprintf(afl->m_tmp, sizeof(afl->m_tmp), " CLONE-%s-%u-%u",
+                     "insert", clone_to, clone_len);
+            strcat(afl->mutation, afl->m_tmp);
+#endif
+            u8 *new_buf = ck_realloc(leakage_scratch_buf, temp_combined_len + clone_len);
+            if (unlikely(!new_buf)) { PFATAL("alloc"); }
+
+            /* Head */
+
+            memcpy(new_buf, mutate_buf, clone_to);
+
+            /* Inserted part */
+
+            memset(new_buf + clone_to,
+                   rand_below(afl, 2) ? rand_below(afl, 256)
+                                      : mutate_buf[rand_below(afl, temp_combined_len)],
+                   clone_len);
+
+            /* Tail */
+            memcpy(new_buf + clone_to + clone_len, mutate_buf + clone_to,
+                   temp_combined_len - clone_to);
+
+            u8 *tmp = mutate_buf;
+            mutate_buf = new_buf;
+            leakage_scratch_buf = tmp;
+
+            if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
+              if (clone_to < leak_input.mutated_public_len) {
+                temp_public_len += clone_len;
+              } else {
+                temp_secret_len += clone_len;
+              }
+            }  else {
+              temp_secret_len += clone_len;
+            }
+
+            temp_combined_len += clone_len;
+
+          }
+
+          break;
+
+        }
+
+        case 48 ... 50: {
+
+          /* Overwrite bytes with a randomly selected chunk bytes. */
+
+          if (temp_combined_len < 2) { break; }
+
+          u32 copy_len = choose_block_len(afl, temp_combined_len - 1);
+          u32 copy_from = rand_below(afl, temp_combined_len - copy_len + 1);
+          u32 copy_to = rand_below(afl, temp_combined_len - copy_len + 1);
+
+          if (likely(copy_from != copy_to)) {
+
+#ifdef INTROSPECTION
+            snprintf(afl->m_tmp, sizeof(afl->m_tmp), " OVERWRITE_COPY-%u-%u-%u",
+                     copy_from, copy_to, copy_len);
+            strcat(afl->mutation, afl->m_tmp);
+#endif
+            memmove(mutate_buf + copy_to, mutate_buf + copy_from, copy_len);
+
+          }
+
+          break;
+
+        }
+
+        case 51: {
+
+          /* Overwrite bytes with fixed bytes. */
+
+          if (temp_combined_len < 2) { break; }
+
+          u32 copy_len = choose_block_len(afl, temp_combined_len - 1);
+          u32 copy_to = rand_below(afl, temp_combined_len - copy_len + 1);
+
+#ifdef INTROSPECTION
+          snprintf(afl->m_tmp, sizeof(afl->m_tmp), " OVERWRITE_FIXED-%u-%u",
+                   copy_to, copy_len);
+          strcat(afl->mutation, afl->m_tmp);
+#endif
+          memset(mutate_buf + copy_to,
+                 rand_below(afl, 2) ? rand_below(afl, 256)
+                                    : mutate_buf[rand_below(afl, temp_combined_len)],
+                 copy_len);
+
+          break;
+
+        }
+
+        // increase from 4 up to 8?
+        case 52 ... MAX_HAVOC_ENTRY: {
+
+          /* Delete bytes. We're making this a bit more likely
+             than insertion (the next option) in hopes of keeping
+             files reasonably small. */
+
+          if (temp_combined_len < 2) { break; }
+
+          /* Don't delete too much. */
+
+          u32 del_len = choose_block_len(afl, temp_combined_len - 1);
+          u32 del_from = rand_below(afl, temp_combined_len - del_len + 1);
+
+#ifdef INTROSPECTION
+          snprintf(afl->m_tmp, sizeof(afl->m_tmp), " DEL-%u-%u", del_from,
+                   del_len);
+          strcat(afl->mutation, afl->m_tmp);
+#endif
+          memmove(mutate_buf + del_from, mutate_buf + del_from + del_len,
+                  temp_combined_len - del_from - del_len);
+
+          if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
+            if (del_from < leak_input.mutated_public_len &&
+                del_from + del_len >= leak_input.mutated_public_len) {
+              u32 deleted_public = temp_public_len - del_from;
+              temp_public_len = del_from;
+              temp_secret_len -= (del_len - deleted_public);
+              printf("1. subtracted (%u) from temp_secret_len (now %u)!\n", del_len - deleted_public, temp_secret_len);
+            } else if (del_from < leak_input.mutated_public_len) {
+              temp_public_len -= del_len;
+              printf("subtracted (%u) from temp_public_len (now %u)!\n", del_len, temp_public_len);
+            } else {
+              temp_secret_len -= del_len;
+              printf("2. subtracted (%u) from temp_secret_len (now %u)!\n", del_len, temp_secret_len);
+            }
+          } else {
+            temp_secret_len -= del_len;
+            printf("3. subtracted (%u) from temp_secret_len (now %u)!\n", del_len, temp_secret_len);
+          }
+
+          temp_combined_len -= del_len;
+
+          break;
+
+        }
+
+        default:
+
+          r -= (MAX_HAVOC_ENTRY + 1);
+
+          if (afl->extras_cnt) {
+
+            if (afl->fsrv.leakage_hunting) {
+              FATAL("Didn't implement extras_cnt for leakage!");
+            }
+//
+//            if (r < 2) {
+//
+//              /* Use the dictionary. */
+//
+//              u32 use_extra = rand_below(afl, afl->extras_cnt);
+//              u32 extra_len = afl->extras[use_extra].len;
+//
+//              if (extra_len > temp_len) { break; }
+//
+//              u32 insert_at = rand_below(afl, temp_len - extra_len + 1);
+//#ifdef INTROSPECTION
+//              snprintf(afl->m_tmp, sizeof(afl->m_tmp), " EXTRA_OVERWRITE-%u-%u",
+//                       insert_at, extra_len);
+//              strcat(afl->mutation, afl->m_tmp);
+//#endif
+//              memcpy(out_buf + insert_at, afl->extras[use_extra].data,
+//                     extra_len);
+//
+//              break;
+//
+//            } else if (r < 4) {
+//
+//              u32 use_extra = rand_below(afl, afl->extras_cnt);
+//              u32 extra_len = afl->extras[use_extra].len;
+//              if (temp_len + extra_len >= MAX_FILE) { break; }
+//
+//              u8 *ptr = afl->extras[use_extra].data;
+//              u32 insert_at = rand_below(afl, temp_len + 1);
+//#ifdef INTROSPECTION
+//              snprintf(afl->m_tmp, sizeof(afl->m_tmp), " EXTRA_INSERT-%u-%u",
+//                       insert_at, extra_len);
+//              strcat(afl->mutation, afl->m_tmp);
+//#endif
+//
+//              out_buf = afl_realloc(AFL_BUF_PARAM(out), temp_len + extra_len);
+//              if (unlikely(!out_buf)) { PFATAL("alloc"); }
+//
+//              /* Tail */
+//              memmove(out_buf + insert_at + extra_len, out_buf + insert_at,
+//                      temp_len - insert_at);
+//
+//              /* Inserted part */
+//              memcpy(out_buf + insert_at, ptr, extra_len);
+//              temp_len += extra_len;
+//
+//              break;
+//
+//            } else {
+//
+//              r -= 4;
+//
+//            }
+
+          }
+
+          if (afl->a_extras_cnt) {
+
+            if (afl->fsrv.leakage_hunting) {
+              FATAL("Didn't implement a_extras_cnt for leakage!");
+            }
+
+//            if (r < 2) {
+//
+//              /* Use the dictionary. */
+//
+//              u32 use_extra = rand_below(afl, afl->a_extras_cnt);
+//              u32 extra_len = afl->a_extras[use_extra].len;
+//
+//              if (extra_len > temp_len) { break; }
+//
+//              u32 insert_at = rand_below(afl, temp_len - extra_len + 1);
+//#ifdef INTROSPECTION
+//              snprintf(afl->m_tmp, sizeof(afl->m_tmp),
+//                       " AUTO_EXTRA_OVERWRITE-%u-%u", insert_at, extra_len);
+//              strcat(afl->mutation, afl->m_tmp);
+//#endif
+//              memcpy(out_buf + insert_at, afl->a_extras[use_extra].data,
+//                     extra_len);
+//
+//              break;
+//
+//            } else if (r < 4) {
+//
+//              u32 use_extra = rand_below(afl, afl->a_extras_cnt);
+//              u32 extra_len = afl->a_extras[use_extra].len;
+//              if (temp_len + extra_len >= MAX_FILE) { break; }
+//
+//              u8 *ptr = afl->a_extras[use_extra].data;
+//              u32 insert_at = rand_below(afl, temp_len + 1);
+//#ifdef INTROSPECTION
+//              snprintf(afl->m_tmp, sizeof(afl->m_tmp),
+//                       " AUTO_EXTRA_INSERT-%u-%u", insert_at, extra_len);
+//              strcat(afl->mutation, afl->m_tmp);
+//#endif
+//
+//              out_buf = afl_realloc(AFL_BUF_PARAM(out), temp_len + extra_len);
+//              if (unlikely(!out_buf)) { PFATAL("alloc"); }
+//
+//              /* Tail */
+//              memmove(out_buf + insert_at + extra_len, out_buf + insert_at,
+//                      temp_len - insert_at);
+//
+//              /* Inserted part */
+//              memcpy(out_buf + insert_at, ptr, extra_len);
+//              temp_len += extra_len;
+//
+//              break;
+//
+//            } else {
+//
+//              r -= 4;
+//
+//            }
+
+          }
+
+          /* Splicing otherwise if we are still here.
+             Overwrite bytes with a randomly selected chunk from another
+             testcase or insert that chunk. */
+
+          /* Pick a random queue entry and seek to it. */
+
+          u32 tid;
+          do {
+
+            tid = rand_below(afl, afl->queued_paths);
+
+          } while (tid == afl->current_entry || afl->queue_buf[tid]->len < 4);
+
+          printf("WEIRD splice\n");
+
+          /* Get the testcase for splicing. */
+          struct queue_entry *target = afl->queue_buf[tid];
+          u32                 new_len = target->len;
+          u8 *                new_buf = queue_testcase_get(afl, target);
+
+          u8 *new_public_buf, *new_secret_buf;
+          u32 new_public_len, new_secret_len;
+          find_public_and_secret_inputs(new_buf, new_len,
+                                        &new_public_buf, &new_public_len,
+                                        &new_secret_buf, &new_secret_len);
+
+          if ((temp_combined_len >= 2 && r % 2) || temp_combined_len + HAVOC_BLK_XL >= MAX_FILE) {
+
+            /* overwrite mode */
+
+            u32 copy_from, copy_to, copy_len;
+
+            if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
+
+              copy_len = choose_block_len(afl, new_len - 1);
+              if (copy_len > temp_combined_len) copy_len = temp_combined_len;
+              copy_from = rand_below(afl, new_len - copy_len + 1);
+              copy_to = rand_below(afl, temp_combined_len - copy_len + 1);
+
+#ifdef INTROSPECTION
+              snprintf(afl->m_tmp, sizeof(afl->m_tmp),
+                       " SPLICE_OVERWRITE-%u-%u-%u-%s", copy_from, copy_to,
+                       copy_len, target->fname);
+              strcat(afl->mutation, afl->m_tmp);
+#endif
+              memmove(mutate_buf + copy_to, new_buf + copy_from, copy_len);
+
+            } else {
+
+              copy_len = choose_block_len(afl, new_secret_len - 1);
+              if (copy_len > temp_combined_len) copy_len = temp_combined_len;
+              copy_from = rand_below(afl, new_len - copy_len + 1);
+              copy_to = rand_below(afl, temp_combined_len - copy_len + 1);
+
+#ifdef INTROSPECTION
+              snprintf(afl->m_tmp, sizeof(afl->m_tmp),
+                       " SPLICE_OVERWRITE-%u-%u-%u-%s", copy_from, copy_to,
+                       copy_len, target->fname);
+              strcat(afl->mutation, afl->m_tmp);
+#endif
+              memmove(mutate_buf + copy_to, new_buf + copy_from, copy_len);
+
+            }
+
+
+          } else {
+
+            /* insert mode */
+
+            u32 clone_from, clone_to, clone_len;
+
+            if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
+              clone_len = choose_block_len(afl, new_len);
+              clone_from = rand_below(afl, new_len - clone_len + 1);
+            } else {
+              clone_len = choose_block_len(afl, new_secret_len);
+              clone_from = rand_below(afl, new_secret_len - clone_len + 1);
+            }
+            clone_to = rand_below(afl, temp_combined_len + 1);
+
+            u8 *temp_buf = ck_realloc(leakage_scratch_buf, temp_combined_len + clone_len + 1);
+            if (unlikely(!temp_buf)) { PFATAL("alloc"); }
+
+#ifdef INTROSPECTION
+            snprintf(afl->m_tmp, sizeof(afl->m_tmp),
+                     " SPLICE_INSERT-%u-%u-%u-%s", clone_from, clone_to,
+                     clone_len, target->fname);
+            strcat(afl->mutation, afl->m_tmp);
+#endif
+            /* Head */
+
+            memcpy(temp_buf, mutate_buf, clone_to);
+
+            /* Inserted part */
+
+            memcpy(temp_buf + clone_to, new_buf + clone_from, clone_len);
+
+            /* Tail */
+            memcpy(temp_buf + clone_to + clone_len, mutate_buf + clone_to,
+                   temp_combined_len - clone_to);
+
+            u8 *tmp = mutate_buf;
+            mutate_buf = temp_buf;
+            leakage_scratch_buf = tmp;
+
+            if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
+              if (clone_to < temp_public_len) {
+                temp_public_len += clone_len;
+              } else {
+                temp_secret_len += clone_len;
+              }
+            } else {
+              temp_secret_len += clone_len;
+            }
+
+            temp_combined_len += clone_len;
+
+          }
+
+          ck_free(new_public_buf);
+          ck_free(new_secret_buf);
+
+          break;
+
+          // end of default
+
+      }
+
+    }
+
+    u8 res = 0;
+    if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
+      fflush(stdout);
+      res = leakage_fuzz_stuff(afl, mutate_buf, temp_public_len,
+                               mutate_buf + temp_public_len, temp_secret_len);
+    } else {
+      res = leakage_fuzz_stuff(afl, leak_input.mutated_combined_buf, leak_input.mutated_public_len,
+                               mutate_buf, temp_combined_len);
+    }
+
+    if (res) {
+      goto abandon_entry;
+    }
+
+    u32 len = afl->fsrv.stdout_raw_buffer_len;
+    char *tmp = malloc(len * 2);
+    u32 tmp_len = 0;
+    for (u32 i = 0; i < len; i++, tmp_len++) {
+      if (afl->fsrv.stdout_raw_buffer[i] == '\n') {
+        tmp[tmp_len++] = '\\';
+        tmp[tmp_len] = 'n';
+      } else {
+        tmp[tmp_len] = afl->fsrv.stdout_raw_buffer[i];
+      }
+    }
+
+    if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
+      printf("Tested (mutate_secret: %d): { L: %.*s, H: %.*s, O: \"%.*s\" }\n",
+             0, temp_public_len, mutate_buf, temp_secret_len, mutate_buf + temp_public_len,
+             tmp_len, tmp);
+    } else {
+      printf("Tested (mutate_secret: %d): { L: %.*s, H: %.*s, O: \"%.*s\" }\n",
+             1, leak_input.mutated_public_len, leak_input.mutated_combined_buf,
+             temp_combined_len, mutate_buf, tmp_len, tmp);
+    }
+
+    free(tmp);
+
+    if (afl->fsrv.stdout_raw_buffer) {
+      if (!afl->queue_cur->public_output_buffer) {
+        FATAL("Don't have the expected output for queued path %u",
+              afl->current_entry);
+      }
+    }
+    //
+    //      if (!mutate_public) {
+    //        bool leaks =
+    //            afl->fsrv.stdout_raw_buffer_len != afl->queue_cur->public_output_bufer_len ||
+    //            memcmp(
+    //                afl->fsrv.stdout_raw_buffer,
+    //                afl->queue_cur->public_output_buffer,
+    //                afl->fsrv.stdout_raw_buffer_len
+    //            );
+    //
+    //        if (leaks) {
+    //
+    //          char *low1 = malloc(Base64encode_len(afl->queue_cur->public_input_len));
+    //          Base64encode(low1,
+    //                       afl->queue_cur->public_input_start,
+    //                       afl->queue_cur->public_input_len);
+    //          char *low2 = malloc(Base64encode_len(leak_input.public_len));
+    //          Base64encode(low2, leak_input.public_buf, leak_input.public_len);
+    //
+    //          char *secret1 = malloc(Base64encode_len(afl->queue_cur->secret_input_len));
+    //          Base64encode(secret1,
+    //                       afl->queue_cur->secret_input_start,
+    //                       afl->queue_cur->secret_input_len);
+    //          char *secret2 = malloc(Base64encode_len(temp_len));
+    //          Base64encode(secret2, out_buf, leak_input.secret_len);
+    //
+    //          char *out1 = malloc(Base64encode_len(afl->queue_cur->public_output_bufer_len));
+    //          Base64encode(out1,
+    //                       afl->queue_cur->public_output_buffer,
+    //                       afl->queue_cur->public_output_bufer_len);
+    //          char *out2 = malloc(Base64encode_len(afl->fsrv.stdout_raw_buffer_len));
+    //          Base64encode(out2,
+    //                       afl->fsrv.stdout_raw_buffer,
+    //                       afl->fsrv.stdout_raw_buffer_len);
+    //
+    //          FATAL("Leakage detected for hypertest pair: \n"
+    //                "{\n  LOW: %s,\n  HIGH: %s,\n  OUT: %s\n}"
+    //                "{\n  LOW: %s,\n  HIGH: %s,\n  OUT: %s\n}",
+    //                low1, secret1, out1, low2, secret2, out2);
+    //
+    //        }
+    //      }
+    //    }
+
+    /* out_buf might have been mangled a bit, so let's restore it to its
+       original size and shape. */
+
+//    if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
+//      len = temp_len = leak_input.mutated_public_len + leak_input.mutated_secret_len;
+//      mutate_buf = ck_realloc(mutate_buf, len);
+//      memcpy(mutate_buf,
+//             leak_input.mutated_combined_buf,
+//             leak_input.mutated_public_len + leak_input.mutated_secret_len);
+//    } else {
+//      len = temp_len = leak_input.mutated_secret_len;
+//      mutate_buf = ck_realloc(mutate_buf, len);
+//      memcpy(mutate_buf,
+//             leak_input.mutated_combined_buf + leak_input.mutated_public_len,
+//             leak_input.mutated_secret_len);
+//    }
+
+//    mutate_buf = ck_realloc(mutate_buf, temp_len);
+//    if (unlikely(!mutate_buf)) { PFATAL("alloc"); }
+//    memcpy(mutate_buf,
+//           leak_input.mutated_combined_buf,
+//           len);
+
+    /* If we're finding new stuff, let's run for a bit longer, limits
+       permitting. */
+
+    if (afl->queued_paths != havoc_queued) {
+
+      if (perf_score <= afl->havoc_max_mult * 100) {
+
+        afl->stage_max *= 2;
+        perf_score *= 2;
+
+      }
+
+      havoc_queued = afl->queued_paths;
+
+    }
+
+  }
+
+  new_hit_cnt = afl->queued_paths + afl->unique_crashes;
+
+  if (!splice_cycle) {
+
+    afl->stage_finds[STAGE_HAVOC] += new_hit_cnt - orig_hit_cnt;
+    afl->stage_cycles[STAGE_HAVOC] += afl->stage_max;
+
+  } else {
+
+    afl->stage_finds[STAGE_SPLICE] += new_hit_cnt - orig_hit_cnt;
+    afl->stage_cycles[STAGE_SPLICE] += afl->stage_max;
+
+  }
+
+#ifndef IGNORE_FINDS
+
+  /************
+   * SPLICING *
+   ************/
+
+  /* This is a last-resort strategy triggered by a full round with no findings.
+     It takes the current input file, randomly selects another input, and
+     splices them together at some offset, then relies on the havoc
+     code to mutate that blob. */
+
+retry_splicing:
+
+  if (afl->use_splicing && splice_cycle++ < (afl->fsrv.leakage_hunting ? 2 : 1) * SPLICE_CYCLES &&
+      afl->ready_for_splicing_count > 1 && afl->queue_cur->len >= 4) {
+
+    if (afl->fsrv.leakage_hunting) {
+      FATAL("Entering splice phase\n");
+    }
+//
+//    struct queue_entry *target;
+//    u32                 tid, split_at;
+//    u8 *                new_buf;
+//    s32                 f_diff, l_diff;
+//
+//    /* First of all, if we've modified in_buf for havoc, let's clean that
+//       up... */
+//
+//    bool mutate_public = splice_cycle < SPLICE_CYCLES;
+//    if (afl->fsrv.leakage_hunting) {
+//
+//      in_buf = orig_in = mutate_public ? leak_input.public_buf : leak_input.secret_buf;
+//      len = mutate_public ? leak_input.public_len : leak_input.secret_len;
+//
+//    } else {
+//
+//      if (in_buf != orig_in) {
+//
+//        in_buf = orig_in;
+//        len = afl->queue_cur->len;
+//
+//      }
+//
+//    }
+//
+//    /* Pick a random queue entry and seek to it. Don't splice with yourself. */
+//
+//    do {
+//
+//      tid = rand_below(afl, afl->queued_paths);
+//
+//    } while (tid == afl->current_entry || afl->queue_buf[tid]->len < 4);
+//
+//    /* Get the testcase */
+//    afl->splicing_with = tid;
+//    target = afl->queue_buf[tid];
+//    new_buf = queue_testcase_get(afl, target);
+//
+//    u32 target_len = target->len;
+//    char *target_buf = new_buf;
+//
+//    if (afl->fsrv.leakage_hunting) {
+//      if (mutate_public) {
+//        public_input_for_queue_entry(target, &target_buf, &target_len);
+//      } else {
+//        secret_input_for_queue_entry(target, &target_buf, &target_len);
+//      }
+//    }
+//
+//    /* Find a suitable splicing location, somewhere between the first and
+//       the last differing byte. Bail out if the difference is just a single
+//       byte or so. */
+//
+//    locate_diffs(in_buf, new_buf, MIN(len, (s64)target_len), &f_diff, &l_diff);
+//
+//    if (f_diff < 0 || l_diff < 2 || f_diff == l_diff) { goto retry_splicing; }
+//
+//    /* Split somewhere between the first and last differing byte. */
+//
+//    split_at = f_diff + rand_below(afl, l_diff - f_diff);
+//
+//    /* Do the thing. */
+//
+//    len = target_len;
+//    afl->in_scratch_buf = afl_realloc(AFL_BUF_PARAM(in_scratch), len);
+//    memcpy(afl->in_scratch_buf, in_buf, split_at);
+//    memcpy(afl->in_scratch_buf + split_at, new_buf, len - split_at);
+//    in_buf = afl->in_scratch_buf;
+//    afl_swap_bufs(AFL_BUF_PARAM(in), AFL_BUF_PARAM(in_scratch));
+//
+//    out_buf = afl_realloc(AFL_BUF_PARAM(out), len);
+//    if (unlikely(!out_buf)) { PFATAL("alloc"); }
+//    memcpy(out_buf, in_buf, len);
+//
+//    if (afl->fsrv.leakage_hunting) {
+//      if (mutate_public) {
+//        leak_input.public_buf = ck_realloc(leak_input.public_buf, len);
+//      } else {
+//        leak_input.secret_buf = ck_realloc(leak_input.secret_buf, len);
+//      }
+//
+//      printf("splice: mutate_public: %d, Created spliced entry: %*.s\n",
+//             mutate_public,
+//             mutate_public ? leak_input.public_len : leak_input.secret_len,
+//             mutate_public ? leak_input.public_buf : leak_input.secret_buf);
+//      ck_free(target_buf);
+//    }
+//
+//    goto custom_mutator_stage;
+
+  }
+
+#endif                                                     /* !IGNORE_FINDS */
+
+  ret_val = 0;
+
+/* we are through with this queue entry - for this iteration */
+abandon_entry:
+
+  if (afl->fsrv.leakage_hunting) {
+    ck_free(leak_input.mutated_combined_buf);
+    ck_free(leak_input.orig_public_buf);
+    ck_free(leak_input.orig_secret_buf);
+  }
+
+  afl->splicing_with = -1;
+
+  /* Update afl->pending_not_fuzzed count if we made it through the calibration
+     cycle and have not seen this entry before. */
+
+  if (!afl->stop_soon && !afl->queue_cur->cal_failed &&
+      (afl->queue_cur->was_fuzzed == 0 || afl->queue_cur->fuzz_level == 0) &&
+      !afl->queue_cur->disabled) {
+
+    if (!afl->queue_cur->was_fuzzed) {
+
+      --afl->pending_not_fuzzed;
+      afl->queue_cur->was_fuzzed = 1;
+      afl->reinit_table = 1;
+      if (afl->queue_cur->favored) { --afl->pending_favored; }
+
+    }
+
+  }
+
+  ++afl->queue_cur->fuzz_level;
+  return ret_val;
+
+#undef FLIP_BIT
+
+}

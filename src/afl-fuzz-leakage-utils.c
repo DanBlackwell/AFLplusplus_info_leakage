@@ -24,7 +24,9 @@ void find_public_and_secret_inputs(const char *testcase_buf, u32 testcase_len,
       {SECRET_KEY, t_string, .addr.string = raw_secret, .len = testcase_len }
   };
 
-  int err = json_read_object(testcase_buf, json_attrs, NULL);
+  char *end;
+  int err = json_read_object(testcase_buf, json_attrs, (const char **)&end);
+//  printf("json end: %p (%llu from start)\n", end, end - testcase_buf);
 
   if (err) {
     printf("Failed to decode testcase_buf (json error: %s).\n  RAW: %s",
