@@ -7645,7 +7645,7 @@ havoc_stage:
             leakage_scratch_buf = tmp;
 
             if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
-              if (clone_to < leak_input.mutated_public_len) {
+              if (clone_to < temp_public_len) {
                 temp_public_len += clone_len;
               } else {
                 temp_secret_len += clone_len;
@@ -7699,7 +7699,7 @@ havoc_stage:
             leakage_scratch_buf = tmp;
 
             if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
-              if (clone_to < leak_input.mutated_public_len) {
+              if (clone_to < temp_public_len) {
                 temp_public_len += clone_len;
               } else {
                 temp_secret_len += clone_len;
@@ -7787,22 +7787,18 @@ havoc_stage:
                   temp_combined_len - del_from - del_len);
 
           if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
-            if (del_from < leak_input.mutated_public_len &&
-                del_from + del_len >= leak_input.mutated_public_len) {
+            if (del_from < temp_public_len &&
+                del_from + del_len >= temp_public_len) {
               u32 deleted_public = temp_public_len - del_from;
               temp_public_len = del_from;
               temp_secret_len -= (del_len - deleted_public);
-              printf("1. subtracted (%u) from temp_secret_len (now %u)!\n", del_len - deleted_public, temp_secret_len);
-            } else if (del_from < leak_input.mutated_public_len) {
+            } else if (del_from < temp_public_len) {
               temp_public_len -= del_len;
-              printf("subtracted (%u) from temp_public_len (now %u)!\n", del_len, temp_public_len);
             } else {
               temp_secret_len -= del_len;
-              printf("2. subtracted (%u) from temp_secret_len (now %u)!\n", del_len, temp_secret_len);
             }
           } else {
             temp_secret_len -= del_len;
-            printf("3. subtracted (%u) from temp_secret_len (now %u)!\n", del_len, temp_secret_len);
           }
 
           temp_combined_len -= del_len;
