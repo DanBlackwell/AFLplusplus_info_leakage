@@ -5518,9 +5518,9 @@ struct leakage_test_input {
   u32 orig_public_len;
   u8 *orig_secret_buf;
   u32 orig_secret_len;
-  u8 *mutated_combined_buf;
-  u32 mutated_public_len;
-  u32 mutated_secret_len;
+  u8 *mutation_seed_combined_buf;
+  u32 mutation_seed_public_len;
+  u32 mutation_seed_secret_len;
 };
 
 enum leakage_fuzz_phase {
@@ -5724,19 +5724,19 @@ u8 leakage_fuzz_one_original(afl_state_t *afl) {
 //
 //  }
 
-  leak_input.mutated_public_len = leak_input.orig_public_len;
-  leak_input.mutated_secret_len = leak_input.orig_secret_len;
-  len = temp_len = leak_input.mutated_public_len + leak_input.mutated_secret_len;
-  leak_input.mutated_combined_buf = ck_alloc(len);
-  leak_input.raw_combined_buf = leak_input.mutated_combined_buf;
+  leak_input.mutation_seed_public_len = leak_input.orig_public_len;
+  leak_input.mutation_seed_secret_len = leak_input.orig_secret_len;
+  len = temp_len = leak_input.mutation_seed_public_len + leak_input.mutation_seed_secret_len;
+  leak_input.mutation_seed_combined_buf = ck_alloc(len);
+  leak_input.raw_combined_buf = leak_input.mutation_seed_combined_buf;
 
-  memcpy(leak_input.mutated_combined_buf,
+  memcpy(leak_input.mutation_seed_combined_buf,
          leak_input.orig_public_buf,
-         leak_input.mutated_public_len);
+         leak_input.mutation_seed_public_len);
 
-  memcpy(leak_input.mutated_combined_buf + leak_input.mutated_public_len,
+  memcpy(leak_input.mutation_seed_combined_buf + leak_input.mutation_seed_public_len,
          leak_input.orig_secret_buf,
-         leak_input.mutated_secret_len);
+         leak_input.mutation_seed_secret_len);
 
   /*********************
    * PERFORMANCE SCORE *
@@ -7248,11 +7248,17 @@ havoc_stage:
       printf("In LEAKAGE_FUZZ_MUTATE_SECRET phase\n");
     }
 
-    u32 temp_public_len = leak_input.mutated_public_len;
-    u32 temp_secret_len = leak_input.mutated_secret_len;
+    u32 temp_public_len = leak_input.mutation_seed_public_len;
+    u32 temp_secret_len = leak_input.mutation_seed_secret_len;
     u32 temp_combined_len = leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT ?
-                            leak_input.mutated_public_len + leak_input.mutated_secret_len :
-                            leak_input.mutated_secret_len;
+                            leak_input.mutation_seed_public_len + leak_input.mutation_seed_secret_len :
+                            leak_input.mutation_seed_secret_len;
+
+    if (temp_combined_len == 0) {
+      printf("Skipping current input (full_input? %u) as temp_combined_len is 0\n",
+             leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT);
+      break;
+    }
 
     mutate_buf = ck_realloc(mutate_buf, temp_combined_len);
     if (!mutate_buf) {
@@ -7261,12 +7267,12 @@ havoc_stage:
 
     if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
       memcpy(mutate_buf,
-             leak_input.mutated_combined_buf,
-             leak_input.mutated_public_len + leak_input.mutated_secret_len);
+             leak_input.mutation_seed_combined_buf,
+             leak_input.mutation_seed_public_len + leak_input.mutation_seed_secret_len);
     } else {
       memcpy(mutate_buf,
-             leak_input.mutated_combined_buf + leak_input.mutated_public_len,
-             leak_input.mutated_secret_len);
+             leak_input.mutation_seed_combined_buf + leak_input.mutation_seed_public_len,
+             leak_input.mutation_seed_secret_len);
     }
 
 
@@ -7957,6 +7963,7 @@ havoc_stage:
           u32                 new_len = target->len;
           u8 *                new_buf = queue_testcase_get(afl, target);
 
+          printf("Fetched queue[%u] for splicing: %.*s\n", tid, new_len, new_buf);
           u8 *new_public_buf, *new_secret_buf;
           u32 new_public_len, new_secret_len;
           find_public_and_secret_inputs(new_buf, new_len,
@@ -8073,7 +8080,7 @@ havoc_stage:
       res = leakage_fuzz_stuff(afl, mutate_buf, temp_public_len,
                                mutate_buf + temp_public_len, temp_secret_len);
     } else {
-      res = leakage_fuzz_stuff(afl, leak_input.mutated_combined_buf, leak_input.mutated_public_len,
+      res = leakage_fuzz_stuff(afl, leak_input.mutation_seed_combined_buf, leak_input.mutation_seed_public_len,
                                mutate_buf, temp_combined_len);
     }
 
@@ -8099,7 +8106,7 @@ havoc_stage:
              tmp_len, tmp);
     } else {
       printf("Tested (mutate_secret: %d): { L: %.*s, H: %.*s, O: \"%.*s\" }\n",
-             1, leak_input.mutated_public_len, leak_input.mutated_combined_buf,
+             1, leak_input.mutation_seed_public_len, leak_input.mutation_seed_combined_buf,
              temp_combined_len, mutate_buf, tmp_len, tmp);
     }
 
@@ -8159,23 +8166,23 @@ havoc_stage:
        original size and shape. */
 
 //    if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
-//      len = temp_len = leak_input.mutated_public_len + leak_input.mutated_secret_len;
+//      len = temp_len = leak_input.mutation_seed_public_len + leak_input.mutation_seed_secret_len;
 //      mutate_buf = ck_realloc(mutate_buf, len);
 //      memcpy(mutate_buf,
-//             leak_input.mutated_combined_buf,
-//             leak_input.mutated_public_len + leak_input.mutated_secret_len);
+//             leak_input.mutation_seed_combined_buf,
+//             leak_input.mutation_seed_public_len + leak_input.mutation_seed_secret_len);
 //    } else {
-//      len = temp_len = leak_input.mutated_secret_len;
+//      len = temp_len = leak_input.mutation_seed_secret_len;
 //      mutate_buf = ck_realloc(mutate_buf, len);
 //      memcpy(mutate_buf,
-//             leak_input.mutated_combined_buf + leak_input.mutated_public_len,
-//             leak_input.mutated_secret_len);
+//             leak_input.mutation_seed_combined_buf + leak_input.mutation_seed_public_len,
+//             leak_input.mutation_seed_secret_len);
 //    }
 
 //    mutate_buf = ck_realloc(mutate_buf, temp_len);
 //    if (unlikely(!mutate_buf)) { PFATAL("alloc"); }
 //    memcpy(mutate_buf,
-//           leak_input.mutated_combined_buf,
+//           leak_input.mutation_seed_combined_buf,
 //           len);
 
     /* If we're finding new stuff, let's run for a bit longer, limits
@@ -8226,6 +8233,7 @@ retry_splicing:
   if (afl->use_splicing && splice_cycle++ < SPLICE_CYCLES &&
       afl->ready_for_splicing_count > 1 && afl->queue_cur->len >= 4) {
 
+    printf("should have spliced\n");
     goto abandon_entry;
 //    FATAL("SPLICING");
 
@@ -8237,8 +8245,8 @@ retry_splicing:
     /* First of all, if we've modified in_buf for havoc, let's clean that
        up... */
 
-    if (leak_input.mutated_combined_buf != leak_input.raw_combined_buf) {
-      leak_input.mutated_combined_buf = leak_input.raw_combined_buf;
+    if (leak_input.mutation_seed_combined_buf != leak_input.raw_combined_buf) {
+      leak_input.mutation_seed_combined_buf = leak_input.raw_combined_buf;
       len = leak_input.raw_combined_buf_len;
     }
 
@@ -8272,14 +8280,14 @@ retry_splicing:
        byte or so. */
 
     if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
-      locate_diffs(leak_input.mutated_combined_buf,
+      locate_diffs(leak_input.mutation_seed_combined_buf,
                    combined_buf,
                    MIN(len, (s64)combined_len),
                    &f_diff, &l_diff);
     } else {
-      locate_diffs(leak_input.mutated_combined_buf + leak_input.mutated_public_len,
+      locate_diffs(leak_input.mutation_seed_combined_buf + leak_input.mutation_seed_public_len,
                    combined_buf + public_len,
-                   MIN(leak_input.mutated_secret_len, secret_len),
+                   MIN(leak_input.mutation_seed_secret_len, secret_len),
                    &f_diff, &l_diff);
     }
 
@@ -8295,41 +8303,41 @@ retry_splicing:
 
       len = combined_len;
       raw_combined_scratch_buf = ck_realloc(raw_combined_scratch_buf, len);
-      memcpy(raw_combined_scratch_buf, leak_input.mutated_combined_buf, split_at);
+      memcpy(raw_combined_scratch_buf, leak_input.mutation_seed_combined_buf, split_at);
       memcpy(raw_combined_scratch_buf + split_at, combined_buf, len - split_at);
 
       u8 *tmp = raw_combined_scratch_buf;
-      raw_combined_scratch_buf = leak_input.mutated_combined_buf;
-      leak_input.mutated_combined_buf = tmp;
+      raw_combined_scratch_buf = leak_input.mutation_seed_combined_buf;
+      leak_input.mutation_seed_combined_buf = tmp;
 
       mutate_buf = ck_realloc(mutate_buf, len);
       if (unlikely(!mutate_buf)) { PFATAL("alloc"); }
-      memcpy(mutate_buf, leak_input.mutated_combined_buf, len);
+      memcpy(mutate_buf, leak_input.mutation_seed_combined_buf, len);
 
     } else {
 
       len = combined_len;
       raw_combined_scratch_buf = ck_realloc(raw_combined_scratch_buf, len);
-      memcpy(raw_combined_scratch_buf, leak_input.mutated_combined_buf, leak_input.mutated_public_len + split_at);
-      memcpy(raw_combined_scratch_buf + leak_input.mutated_public_len + split_at,
+      memcpy(raw_combined_scratch_buf, leak_input.mutation_seed_combined_buf, leak_input.mutation_seed_public_len + split_at);
+      memcpy(raw_combined_scratch_buf + leak_input.mutation_seed_public_len + split_at,
              combined_buf,
              len - split_at);
 
       u8 *tmp = raw_combined_scratch_buf;
-      raw_combined_scratch_buf = leak_input.mutated_combined_buf;
-      leak_input.mutated_combined_buf = tmp;
+      raw_combined_scratch_buf = leak_input.mutation_seed_combined_buf;
+      leak_input.mutation_seed_combined_buf = tmp;
 
       mutate_buf = ck_realloc(mutate_buf, len);
       if (unlikely(!mutate_buf)) { PFATAL("alloc"); }
-      memcpy(mutate_buf, leak_input.mutated_combined_buf, len);
+      memcpy(mutate_buf, leak_input.mutation_seed_combined_buf, len);
 
     }
 
     ck_free(combined_buf);
 
     printf("Combined %.*s\nwith     %.*s, at pos %u, and got: \n%.*s",
-           leak_input.mutated_public_len + leak_input.mutated_secret_len,
-           leak_input.mutated_combined_buf,
+           leak_input.mutation_seed_public_len + leak_input.mutation_seed_secret_len,
+           leak_input.mutation_seed_combined_buf,
            combined_len, combined_buf, split_at, len, mutate_buf);
     fflush(stdout);
 
@@ -8345,7 +8353,7 @@ retry_splicing:
 abandon_entry:
 
   if (afl->fsrv.leakage_hunting) {
-    ck_free(leak_input.mutated_combined_buf);
+    ck_free(leak_input.mutation_seed_combined_buf);
     ck_free(leak_input.orig_public_buf);
     ck_free(leak_input.orig_secret_buf);
   }
