@@ -1,158 +1,287 @@
-/* Structures for JSON parsing using only fixed-extent memory
- *
- * This file is Copyright (c) 2010 by the GPSD project
- * SPDX-License-Identifier: BSD-2-clause
- */
+/* vim: set et ts=3 sw=3 sts=3 ft=c:
+*
+* Copyright (C) 2012-2021 the json-parser authors  All rights reserved.
+* https://github.com/json-parser/json-parser
+*
+* Redistribution and use in source and binary forms, with or without
+* modification, are permitted provided that the following conditions
+* are met:
+*
+* 1. Redistributions of source code must retain the above copyright
+*   notice, this list of conditions and the following disclaimer.
+*
+* 2. Redistributions in binary form must reproduce the above copyright
+*   notice, this list of conditions and the following disclaimer in the
+*   documentation and/or other materials provided with the distribution.
+*
+* THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+* ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+* IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+* ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+* FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+* DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+* OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+* HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+* LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+* OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+* SUCH DAMAGE.
+*/
 
-#include <stdbool.h>
-#include <stdio.h>
-#include <ctype.h>
-#ifdef TIME_ENABLE
-#include <time.h>
-#endif /* TIME_ENABLE */
+#ifndef _JSON_H
+#define _JSON_H
 
-typedef enum {t_integer, t_uinteger, t_real,
-	      t_string, t_boolean, t_character,
-	      t_time,
-	      t_object, t_structobject, t_array,
-	      t_check, t_ignore,
-	      t_short, t_ushort}
-    json_type;
-
-struct json_enum_t {
-    char	*name;
-    int		value;
-};
-
-struct json_array_t {
-    json_type element_type;
-    union {
-	struct {
-	    const struct json_attr_t *subtype;
-	    char *base;
-	    size_t stride;
-	} objects;
-	struct {
-	    char **ptrs;
-	    char *store;
-	    int storelen;
-	} strings;
-	struct {
-	    int *store;
-	} integers;
-	struct {
-	    unsigned int *store;
-	} uintegers;
-	struct {
-	    short *store;
-	} shorts;
-	struct {
-	    unsigned short *store;
-	} ushorts;
-	struct {
-	    double *store;
-	} reals;
-	struct {
-	    bool *store;
-	} booleans;
-    } arr;
-    int *count, maxlen;
-};
-
-struct json_attr_t {
-    char *attribute;
-    json_type type;
-    union {
-	int *integer;
-	unsigned int *uinteger;
-	short *shortint;
-	unsigned short *ushortint;
-	double *real;
-	char *string;
-	bool *boolean;
-	char *character;
-	const struct json_attr_t *attrs;
-	const struct json_array_t array;
-	size_t offset;
-    } addr;
-    union {
-	int integer;
-	unsigned int uinteger;
-	short shortint;
-	unsigned short ushortint;
-	double real;
-	bool boolean;
-	char character;
-	char *check;
-    } dflt;
-    size_t len;
-    const struct json_enum_t *map;
-    bool nodefault;
-};
-
-#define JSON_ATTR_MAX	31	/* max chars in JSON attribute name */
-#define JSON_VAL_MAX	2 * 1024 * 1024	/* max chars in JSON value part */
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-int json_read_object(const char *, const struct json_attr_t *,
-		     const char **);
-int json_read_array(const char *, const struct json_array_t *,
-		    const char **);
-const char *json_error_string(int);
-
-#ifdef TIME_ENABLE
-extern time_t timegm(struct tm *tm);
-#endif /* TIME_ENABLE */
-    
-void json_enable_debug(int, FILE *);
-#ifdef __cplusplus
-}
+#ifndef json_char
+ #define json_char char
 #endif
 
-#define JSON_ERR_OBSTART	1	/* non-WS when expecting object start */
-#define JSON_ERR_ATTRSTART	2	/* non-WS when expecting attrib start */
-#define JSON_ERR_BADATTR	3	/* unknown attribute name */
-#define JSON_ERR_ATTRLEN	4	/* attribute name too long */
-#define JSON_ERR_NOARRAY	5	/* saw [ when not expecting array */
-#define JSON_ERR_NOBRAK 	6	/* array element specified, but no [ */
-#define JSON_ERR_STRLONG	7	/* string value too long */
-#define JSON_ERR_TOKLONG	8	/* token value too long */
-#define JSON_ERR_BADTRAIL	9	/* garbage while expecting comma or } or ] */
-#define JSON_ERR_ARRAYSTART	10	/* didn't find expected array start */
-#define JSON_ERR_OBJARR 	11	/* error while parsing object array */
-#define JSON_ERR_SUBTOOLONG	12	/* too many array elements */
-#define JSON_ERR_BADSUBTRAIL	13	/* garbage while expecting array comma */
-#define JSON_ERR_SUBTYPE	14	/* unsupported array element type */
-#define JSON_ERR_BADSTRING	15	/* error while string parsing */
-#define JSON_ERR_CHECKFAIL	16	/* check attribute not matched */
-#define JSON_ERR_NOPARSTR	17	/* can't support strings in parallel arrays */
-#define JSON_ERR_BADENUM	18	/* invalid enumerated value */
-#define JSON_ERR_QNONSTRING	19	/* saw quoted value when expecting nonstring */
-#define JSON_ERR_NONQSTRING	19	/* didn't see quoted value when expecting string */
-#define JSON_ERR_MISC		20	/* other data conversion error */
-#define JSON_ERR_BADNUM		21	/* error while parsing a numerical argument */
-#define JSON_ERR_NULLPTR	22	/* unexpected null value or attribute pointer */
-#define JSON_ERR_NOCURLY	23	/* object element specified, but no { */
+#ifndef json_int_t
+ #undef JSON_INT_T_OVERRIDDEN
+ #if defined(_MSC_VER)
+   #define json_int_t __int64
+ #elif (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L) || (defined(__cplusplus) && __cplusplus >= 201103L)
+   /* C99 and C++11 */
+   #include <stdint.h>
+   #define json_int_t int_fast64_t
+ #else
+   /* C89 */
+   #define json_int_t long
+ #endif
+#else
+ #define JSON_INT_T_OVERRIDDEN 1
+#endif
 
-/*
- * Use the following macros to declare template initializers for structobject
- * arrays.  Writing the equivalents out by hand is error-prone.
- *
- * STRUCTOBJECT takes a structure name s, and a fieldname f in s.
- *
- * STRUCTARRAY takes the name of a structure array, a pointer to a an
- * initializer defining the subobject type, and the address of an integer to
- * store the length in.
- */
-#define STRUCTOBJECT(s, f)	.addr.offset = offsetof(s, f)
-#define STRUCTARRAY(a, e, n) \
-	.addr.array.element_type = t_structobject, \
-	.addr.array.arr.objects.subtype = e, \
-	.addr.array.arr.objects.base = (char*)a, \
-	.addr.array.arr.objects.stride = sizeof(a[0]), \
-	.addr.array.count = n, \
-	.addr.array.maxlen = (int)(sizeof(a)/sizeof(a[0]))
+#include <stddef.h>
 
-/* json.h ends here */
+#ifdef __cplusplus
+
+ #include <string.h>
+
+extern "C"
+{
+
+#endif
+
+typedef struct
+{
+ unsigned long max_memory;  /* should be size_t, but would modify the API */
+ int settings;
+
+ /* Custom allocator support (leave null to use malloc/free)
+  */
+
+ void * (* mem_alloc) (size_t, int zero, void * user_data);
+ void (* mem_free) (void *, void * user_data);
+
+ void * user_data;  /* will be passed to mem_alloc and mem_free */
+
+ size_t value_extra;  /* how much extra space to allocate for values? */
+
+} json_settings;
+
+#define json_enable_comments  0x01
+
+typedef enum
+{
+ json_none,
+ json_object,
+ json_array,
+ json_integer,
+ json_double,
+ json_string,
+ json_boolean,
+ json_null
+
+} json_type;
+
+extern const struct _json_value json_value_none;
+
+typedef struct _json_object_entry
+{
+ json_char * name;
+ unsigned int name_length;
+
+ struct _json_value * value;
+
+} json_object_entry;
+
+typedef struct _json_value
+{
+ struct _json_value * parent;
+
+ json_type type;
+
+ union
+ {
+   int boolean;
+   json_int_t integer;
+   double dbl;
+
+   struct
+   {
+     unsigned int length;
+     json_char * ptr; /* null terminated */
+
+   } string;
+
+   struct
+   {
+     unsigned int length;
+
+     json_object_entry * values;
+
+#if defined(__cplusplus)
+     json_object_entry * begin () const
+     {  return values;
+     }
+     json_object_entry * end () const
+     {  return values + length;
+     }
+#endif
+
+   } object;
+
+   struct
+   {
+     unsigned int length;
+     struct _json_value ** values;
+
+#if defined(__cplusplus)
+     _json_value ** begin () const
+     {  return values;
+     }
+     _json_value ** end () const
+     {  return values + length;
+     }
+#endif
+
+   } array;
+
+ } u;
+
+ union
+ {
+   struct _json_value * next_alloc;
+   void * object_mem;
+
+ } _reserved;
+
+#ifdef JSON_TRACK_SOURCE
+
+ /* Location of the value in the source JSON
+  */
+ unsigned int line, col;
+
+#endif
+
+
+ /* Some C++ operator sugar */
+
+#ifdef __cplusplus
+
+public:
+
+ inline _json_value ()
+ {  memset (this, 0, sizeof (_json_value));
+ }
+
+ inline const struct _json_value &operator [] (int index) const
+ {
+   if (type != json_array || index < 0
+       || ((unsigned int) index) >= u.array.length)
+   {
+     return json_value_none;
+   }
+
+   return *u.array.values [index];
+ }
+
+ inline const struct _json_value &operator [] (const char * index) const
+ {
+   if (type != json_object)
+     return json_value_none;
+
+   for (unsigned int i = 0; i < u.object.length; ++ i)
+     if (!strcmp (u.object.values [i].name, index))
+       return *u.object.values [i].value;
+
+   return json_value_none;
+ }
+
+ inline operator const char * () const
+ {
+   switch (type)
+   {
+     case json_string:
+       return u.string.ptr;
+
+     default:
+       return "";
+   };
+ }
+
+ inline operator json_int_t () const
+ {
+   switch (type)
+   {
+     case json_integer:
+       return u.integer;
+
+     case json_double:
+       return (json_int_t) u.dbl;
+
+     default:
+       return 0;
+   };
+ }
+
+ inline operator bool () const
+ {
+   if (type != json_boolean)
+     return false;
+
+   return u.boolean != 0;
+ }
+
+ inline operator double () const
+ {
+   switch (type)
+   {
+     case json_integer:
+       return (double) u.integer;
+
+     case json_double:
+       return u.dbl;
+
+     default:
+       return 0;
+   };
+ }
+
+#endif
+
+} json_value;
+
+json_value * json_parse (const json_char * json,
+                      size_t length);
+
+#define json_error_max 128
+json_value * json_parse_ex (json_settings * settings,
+                         const json_char * json,
+                         size_t length,
+                         char * error);
+
+void json_value_free (json_value *);
+
+
+/* Not usually necessary, unless you used a custom mem_alloc and now want to
+* use a custom mem_free.
+*/
+void json_value_free_ex (json_settings * settings,
+                       json_value *);
+
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
+
+#endif

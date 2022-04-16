@@ -16,60 +16,61 @@ void find_public_and_secret_inputs(const char *testcase_buf, u32 testcase_len,
                                    uint8_t **public_input, uint32_t *public_len,
                                    uint8_t **secret_input, uint32_t *secret_len) {
 
+  char *raw_public = NULL, *raw_secret = NULL;
 
-  printf("Allocating %u bytes for testcase_buf\n", testcase_len);
-  fflush(stdout);
+  json_char *json = (json_char *)testcase_buf;
+  json_value *value = json_parse(json, testcase_len);
 
-  const char *raw_buf = testcase_buf;
+  switch (value->type) {
+    case json_object: {
+      u32 len = value->u.object.length;
 
-  char *raw_public = malloc(testcase_len),
-      *raw_secret = malloc(testcase_len);
+      for (u32 i = 0; i < len; i++) {
 
-  static char *terminated_buf = NULL;
-  static uint32_t terminated_buf_alloced = 0;
-  if (testcase_buf[testcase_len - 1] != '\0') {
+        char *name = value->u.object.values[i].name;
+        printf("found name %s\n", name);
 
-    if (testcase_len + 1 > terminated_buf_alloced) {
+        json_type type = value->u.object.values[i].value->type;
+        if (type != json_string) {
+          printf("Saw json field %s that was not a string (type: %d)\n", name, type);
+          continue;
+        }
 
-      u32 bitcnt = 0, val = testcase_len;
-      while (val > 1) { bitcnt++; val >>= 1; }
-      terminated_buf_alloced = 1 << (bitcnt + 2);  // round up to next power of 2
+        char *str = value->u.object.values[i].value->u.string.ptr;
+        u32 length = value->u.object.values[i].value->u.string.length;
 
-      terminated_buf = ck_realloc(terminated_buf, terminated_buf_alloced);
-      if (!terminated_buf) { PFATAL("realloc failed"); }
+        if (!strcmp(name, PUBLIC_KEY)) {
+          raw_public = str;
+        } else if (!strcmp(name, SECRET_KEY)) {
+          raw_secret = str;
+        } else {
+          printf("saw json string { \"%s\": \"%.*s\" }\n", name, length, str);
+        }
 
+      }
+      break;
     }
-
-    memcpy(terminated_buf, testcase_buf, testcase_len);
-    terminated_buf[testcase_len] = '\0';
-    raw_buf = terminated_buf;
+    default:
+      FATAL("JSON: %*.s was not a json-object", testcase_len, testcase_buf);
   }
 
-  const struct json_attr_t json_attrs[] = {
-      {PUBLIC_KEY, t_string, .addr.string = raw_public, .len = testcase_len },
-      {SECRET_KEY, t_string, .addr.string = raw_secret, .len = testcase_len },
-      {NULL}
-  };
+  if (!raw_public) {
+    FATAL("Failed to find PUBLIC in json: %.*s\n", testcase_len, testcase_buf);
+  }
 
-  char *end;
-  int err = json_read_object(raw_buf, json_attrs, (const char **)&end);
-//  printf("json end: %p (%llu from start)\n", end, end - testcase_buf);
-
-  if (err) {
-    printf("Failed to decode testcase_buf (json error: %s).\ (gave it %u bytes)n  RAW: %s",
-           json_error_string(err), testcase_len, raw_buf);
-    exit(1);
+  if (!raw_secret) {
+    FATAL("Failed to find SECRET in json: %.*s\n", testcase_len, testcase_buf);
   }
 
   *public_len = Base64decode_len(raw_public);
   *public_input = malloc(*public_len);
   *public_len = Base64decode(*public_input, raw_public);
-  free(raw_public);
 
   *secret_len = Base64decode_len(raw_secret);
   *secret_input = malloc(*secret_len);
   *secret_len = Base64decode(*secret_input, raw_secret);
-  free(raw_secret);
+
+  json_value_free(value);
 }
 
 void locate_public_and_secret_inputs(struct queue_entry *q) {

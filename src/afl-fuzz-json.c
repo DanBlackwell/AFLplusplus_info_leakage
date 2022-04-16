@@ -1,864 +1,1057 @@
-/****************************************************************************
-
-NAME
-   mjson.c - parse JSON into fixed-extent data structures
-
-DESCRIPTION
-   This module parses a large subset of JSON (JavaScript Object
-Notation).  Unlike more general JSON parsers, it doesn't use malloc(3)
-and doesn't support polymorphism; you need to give it a set of
-template structures describing the expected shape of the incoming
-JSON, and it will error out if that shape is not matched.  When the
-parse succeeds, attribute values will be extracted into static
-locations specified in the template structures.
-
-   The "shape" of a JSON object in the type signature of its
-attributes (and attribute values, and so on recursively down through
-all nestings of objects and arrays).  This parser is indifferent to
-the order of attributes at any level, but you have to tell it in
-advance what the type of each attribute value will be and where the
-parsed value will be stored. The template structures may supply
-default values to be used when an expected attribute is omitted.
-
-   The preceding paragraph told one fib.  A single attribute may
-actually have a span of multiple specifications with different
-syntactically distinguishable types (e.g. string vs. real vs. integer
-vs. boolean, but not signed integer vs. unsigned integer).  The parser
-will match the right spec against the actual data.
-
-   The dialect this parses has some limitations.  First, it cannot
-recognize the JSON "null" value. Second, all elements of an array must
-be of the same type. Third, characters may not be array elements (this
-restriction could be lifted)
-
-   There are separate entry points for beginning a parse of either
-JSON object or a JSON array. JSON "float" quantities are actually
-stored as doubles.
-
-   This parser processes object arrays in one of two different ways,
-defending on whether the array subtype is declared as object or
-structobject.
-
-   Object arrays take one base address per object subfield, and are
-mapped into parallel C arrays (one per subfield).  Strings are not
-supported in this kind of array, as they don't have a "natural" size
-to use as an offset multiplier.
-
-   Structobjects arrays are a way to parse a list of objects to a set
-of modifications to a corresponding array of C structs.  The trick is
-that the array object initialization has to specify both the C struct
-array's base address and the stride length (the size of the C struct).
-If you initialize the offset fields with the correct offsetof calls,
-everything will work. Strings are supported but all string storage
-has to be inline in the struct.
-
-PERMISSIONS
-   This file is Copyright (c) 2014 by Eric S. Raymond
-   SPDX-License-Identifier: BSD-2-Clause
-
-***************************************************************************/
-/* The strptime prototype is not provided unless explicitly requested.
- * We also need to set the value high enough to signal inclusion of
- * newer features (like clock_gettime).  See the POSIX spec for more info:
- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/V2_chap02.html#tag_15_02_01_02 */
-#define _XOPEN_SOURCE 600
-
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <stdbool.h>
-#include <stdarg.h>
-#include <ctype.h>
-#include <errno.h>
-#include <time.h>
-#include <math.h>	/* for HUGE_VAL */
+/* vim: set et ts=3 sw=3 sts=3 ft=c:
+*
+* Copyright (C) 2012-2021 the json-parser authors  All rights reserved.
+* https://github.com/json-parser/json-parser
+*
+* Redistribution and use in source and binary forms, with or without
+* modification, are permitted provided that the following conditions
+* are met:
+*
+* 1. Redistributions of source code must retain the above copyright
+*   notice, this list of conditions and the following disclaimer.
+*
+* 2. Redistributions in binary form must reproduce the above copyright
+*   notice, this list of conditions and the following disclaimer in the
+*   documentation and/or other materials provided with the distribution.
+*
+* THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+* ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+* IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+* ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+* FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+* DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+* OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+* HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+* LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+* OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+* SUCH DAMAGE.
+*/
 
 #include "../include/json.h"
 
-#define str_starts_with(s, p)	(strncmp(s, p, strlen(p)) == 0)
+#ifdef _MSC_VER
+ #ifndef _CRT_SECURE_NO_WARNINGS
+   #define _CRT_SECURE_NO_WARNINGS
+ #endif
+#endif
 
-#ifdef DEBUG_ENABLE
-static int debuglevel = 3;
-static FILE *debugfp;
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <limits.h>
+#include <math.h>
 
-void json_enable_debug(int level, FILE * fp)
-/* control the level and destination of debug trace messages */
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
+ /* C99 might give us uintptr_t and UINTPTR_MAX but they also might not be provided */
+ #include <stdint.h>
+#endif
+
+#ifndef JSON_INT_T_OVERRIDDEN
+ #if defined(_MSC_VER)
+   /* https://docs.microsoft.com/en-us/cpp/cpp/data-type-ranges */
+   #define JSON_INT_MAX 9223372036854775807LL
+ #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
+   /* C99 */
+   #define JSON_INT_MAX INT_FAST64_MAX
+ #else
+   /* C89 */
+   #include <limits.h>
+   #define JSON_INT_MAX LONG_MAX
+ #endif
+#endif
+
+#ifndef JSON_INT_MAX
+ #define JSON_INT_MAX (json_int_t)(((unsigned json_int_t)(-1)) / (unsigned json_int_t)2);
+#endif
+
+typedef unsigned int json_uchar;
+
+const struct _json_value json_value_none;
+
+static unsigned char hex_value (json_char c)
 {
-    debuglevel = level;
-    debugfp = fp;
+ if (isdigit((unsigned char)c))
+   return c - '0';
+
+ switch (c) {
+   case 'a': case 'A': return 0x0A;
+   case 'b': case 'B': return 0x0B;
+   case 'c': case 'C': return 0x0C;
+   case 'd': case 'D': return 0x0D;
+   case 'e': case 'E': return 0x0E;
+   case 'f': case 'F': return 0x0F;
+   default: return 0xFF;
+ }
 }
 
-static void json_trace(int errlevel, const char *fmt, ...)
-/* assemble command in printf(3) style */
+static int would_overflow (json_int_t value, json_char b)
 {
-    if (!debugfp) debugfp = stdout;
-
-    if (errlevel <= debuglevel) {
-	char buf[BUFSIZ];
-	va_list ap;
-
-	(void)strncpy(buf, "json: ", BUFSIZ-1);
-	buf[BUFSIZ-1] = '\0';
-	va_start(ap, fmt);
-	(void)vsnprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), fmt,
-			ap);
-	va_end(ap);
-
-	(void)fputs(buf, debugfp);
-    }
-
-    fflush(debugfp);
+ return ((JSON_INT_MAX - (b - '0')) / 10 ) < value;
 }
 
-# define json_debug_trace(args) (void) json_trace args
+typedef struct
+{
+ size_t used_memory;
+
+ json_settings settings;
+ int first_pass;
+
+ const json_char * ptr;
+ unsigned int cur_line, cur_col;
+
+} json_state;
+
+static void * default_alloc (size_t size, int zero, void * user_data)
+{
+ (void)user_data; /* ignore unused-parameter warn */
+ return zero ? calloc (1, size) : malloc (size);
+}
+
+static void default_free (void * ptr, void * user_data)
+{
+ (void)user_data; /* ignore unused-parameter warn */
+ free (ptr);
+}
+
+static void * json_alloc (json_state * state, size_t size, int zero)
+{
+ if ((ULONG_MAX - 8 - state->used_memory) < size)
+   return 0;
+
+ if (state->settings.max_memory
+     && (state->used_memory += size) > state->settings.max_memory)
+ {
+   return 0;
+ }
+
+ return state->settings.mem_alloc (size, zero, state->settings.user_data);
+}
+
+static int new_value (json_state * state,
+                    json_value ** top, json_value ** root, json_value ** alloc,
+                    json_type type)
+{
+ json_value * value;
+ size_t values_size;
+
+ if (!state->first_pass)
+ {
+   value = *top = *alloc;
+   *alloc = (*alloc)->_reserved.next_alloc;
+
+   if (!*root)
+     *root = value;
+
+   switch (value->type)
+   {
+     case json_array:
+
+       if (value->u.array.length == 0)
+         break;
+
+       if (! (value->u.array.values = (json_value **) json_alloc
+             (state, value->u.array.length * sizeof (json_value *), 0)) )
+       {
+         return 0;
+       }
+
+       value->u.array.length = 0;
+       break;
+
+     case json_object:
+
+       if (value->u.object.length == 0)
+         break;
+
+       values_size = sizeof (*value->u.object.values) * value->u.object.length;
+
+       if (! (value->u.object.values = (json_object_entry *) json_alloc
+#ifdef UINTPTR_MAX
+             (state, values_size + ((uintptr_t) value->u.object.values), 0)) )
 #else
-# define json_debug_trace(args) do { } while (0)
-#endif /* DEBUG_ENABLE */
+             (state, values_size + ((size_t) value->u.object.values), 0)) )
+#endif
+       {
+         return 0;
+       }
 
-static char *json_target_address(const struct json_attr_t *cursor,
-					     const struct json_array_t
-					     *parent, int offset)
-{
-    char *targetaddr = NULL;
-    if (parent == NULL || parent->element_type != t_structobject) {
-	/* ordinary case - use the address in the cursor structure */
-	switch (cursor->type) {
-	case t_ignore:
-	    targetaddr = NULL;
-	    break;
-	case t_integer:
-	    targetaddr = (char *)&cursor->addr.integer[offset];
-	    break;
-	case t_uinteger:
-	    targetaddr = (char *)&cursor->addr.uinteger[offset];
-	    break;
-	case t_short:
-	    targetaddr = (char *)&cursor->addr.shortint[offset];
-	    break;
-	case t_ushort:
-	    targetaddr = (char *)&cursor->addr.ushortint[offset];
-	    break;
-	case t_time:
-	case t_real:
-	    targetaddr = (char *)&cursor->addr.real[offset];
-	    break;
-	case t_string:
-	    targetaddr = cursor->addr.string;
-	    break;
-	case t_boolean:
-	    targetaddr = (char *)&cursor->addr.boolean[offset];
-	    break;
-	case t_character:
-	    targetaddr = (char *)&cursor->addr.character[offset];
-	    break;
-	default:
-	    targetaddr = NULL;
-	    break;
-	}
-    } else
-	/* tricky case - hacking a member in an array of structures */
-	targetaddr =
-	    parent->arr.objects.base + (offset * parent->arr.objects.stride) +
-	    cursor->addr.offset;
-    json_debug_trace((1, "Target address for %s (offset %d) is %p\n",
-		      cursor->attribute, offset, targetaddr));
-    return targetaddr;
+       value->_reserved.object_mem = (void *) (((char *) value->u.object.values) + values_size);
+
+       value->u.object.length = 0;
+       break;
+
+     case json_string:
+
+       if (! (value->u.string.ptr = (json_char *) json_alloc
+             (state, (value->u.string.length + 1) * sizeof (json_char), 0)) )
+       {
+         return 0;
+       }
+
+       value->u.string.length = 0;
+       break;
+
+     default:
+       break;
+   };
+
+   return 1;
+ }
+
+ if (! (value = (json_value *) json_alloc
+       (state, sizeof (json_value) + state->settings.value_extra, 1)))
+ {
+   return 0;
+ }
+
+ if (!*root)
+   *root = value;
+
+ value->type = type;
+ value->parent = *top;
+
+#ifdef JSON_TRACK_SOURCE
+ value->line = state->cur_line;
+ value->col = state->cur_col;
+#endif
+
+ if (*alloc)
+   (*alloc)->_reserved.next_alloc = value;
+
+ *alloc = *top = value;
+
+ return 1;
 }
 
-#ifdef TIME_ENABLE
-static double iso8601_to_unix(char *isotime)
-/* ISO8601 UTC to Unix UTC */
+#define whitespace \
+  case '\n': ++ state.cur_line;  state.cur_col = 0; /* FALLTHRU */ \
+  case ' ': /* FALLTHRU */ case '\t': /* FALLTHRU */ case '\r'
+
+#define string_add(b)  \
+  do { if (!state.first_pass) string [string_length] = b;  ++ string_length; } while (0);
+
+#define line_and_col \
+  state.cur_line, state.cur_col
+
+static const long
+   flag_next             = 1 << 0,
+   flag_reproc           = 1 << 1,
+   flag_need_comma       = 1 << 2,
+   flag_seek_value       = 1 << 3,
+   flag_escaped          = 1 << 4,
+   flag_string           = 1 << 5,
+   flag_need_colon       = 1 << 6,
+   flag_done             = 1 << 7,
+   flag_num_negative     = 1 << 8,
+   flag_num_zero         = 1 << 9,
+   flag_num_e            = 1 << 10,
+   flag_num_e_got_sign   = 1 << 11,
+   flag_num_e_negative   = 1 << 12,
+   flag_line_comment     = 1 << 13,
+   flag_block_comment    = 1 << 14,
+   flag_num_got_decimal  = 1 << 15;
+
+json_value * json_parse_ex (json_settings * settings,
+                         const json_char * json,
+                         size_t length,
+                         char * error_buf)
 {
-    double usec;
-    struct tm tm;
+ char error [json_error_max];
+ const json_char * end;
+ json_value * top, * root, * alloc = 0;
+ json_state state = { 0 };
+ long flags = 0;
+ int num_digits = 0;
+ double num_e = 0, num_fraction = 0;
 
-    char *dp = strptime(isotime, "%Y-%m-%dT%H:%M:%S", &tm);
-    if (dp == NULL)
-	return (double)HUGE_VAL;
-    if (*dp == '.')
-	usec = strtod(dp, NULL);
-    else
-	usec = 0;
-    return (double)timegm(&tm) + usec;
+ /* Skip UTF-8 BOM
+  */
+ if (length >= 3 && ((unsigned char) json [0]) == 0xEF
+     && ((unsigned char) json [1]) == 0xBB
+     && ((unsigned char) json [2]) == 0xBF)
+ {
+   json += 3;
+   length -= 3;
+ }
+
+ error[0] = '\0';
+ end = (json + length);
+
+ memcpy (&state.settings, settings, sizeof (json_settings));
+
+ if (!state.settings.mem_alloc)
+   state.settings.mem_alloc = default_alloc;
+
+ if (!state.settings.mem_free)
+   state.settings.mem_free = default_free;
+
+ for (state.first_pass = 1; state.first_pass >= 0; -- state.first_pass)
+ {
+   json_uchar uchar;
+   unsigned char uc_b1, uc_b2, uc_b3, uc_b4;
+   json_char * string = 0;
+   unsigned int string_length = 0;
+
+   top = root = 0;
+   flags = flag_seek_value;
+
+   state.cur_line = 1;
+
+   for (state.ptr = json ;; ++ state.ptr)
+   {
+     json_char b = (state.ptr == end ? 0 : *state.ptr);
+
+     if (flags & flag_string)
+     {
+       if (!b)
+       {  sprintf (error, "%u:%u: Unexpected EOF in string", line_and_col);
+         goto e_failed;
+       }
+
+       if (string_length > UINT_MAX - 8)
+         goto e_overflow;
+
+       if (flags & flag_escaped)
+       {
+         flags &= ~ flag_escaped;
+
+         switch (b)
+         {
+           case 'b':  string_add ('\b');  break;
+           case 'f':  string_add ('\f');  break;
+           case 'n':  string_add ('\n');  break;
+           case 'r':  string_add ('\r');  break;
+           case 't':  string_add ('\t');  break;
+           case 'u':
+
+             if (end - state.ptr <= 4 ||
+                 (uc_b1 = hex_value (*++ state.ptr)) == 0xFF ||
+                 (uc_b2 = hex_value (*++ state.ptr)) == 0xFF ||
+                 (uc_b3 = hex_value (*++ state.ptr)) == 0xFF ||
+                 (uc_b4 = hex_value (*++ state.ptr)) == 0xFF)
+             {
+               sprintf (error, "%u:%u: Invalid character value `%c`", line_and_col, b);
+               goto e_failed;
+             }
+
+             uc_b1 = (uc_b1 << 4) | uc_b2;
+             uc_b2 = (uc_b3 << 4) | uc_b4;
+             uchar = (uc_b1 << 8) | uc_b2;
+
+             if ((uchar & 0xF800) == 0xD800) {
+               json_uchar uchar2;
+
+               if (end - state.ptr <= 6 || (*++ state.ptr) != '\\' || (*++ state.ptr) != 'u' ||
+                   (uc_b1 = hex_value (*++ state.ptr)) == 0xFF ||
+                   (uc_b2 = hex_value (*++ state.ptr)) == 0xFF ||
+                   (uc_b3 = hex_value (*++ state.ptr)) == 0xFF ||
+                   (uc_b4 = hex_value (*++ state.ptr)) == 0xFF)
+               {
+                 sprintf (error, "%u:%u: Invalid character value `%c`", line_and_col, b);
+                 goto e_failed;
+               }
+
+               uc_b1 = (uc_b1 << 4) | uc_b2;
+               uc_b2 = (uc_b3 << 4) | uc_b4;
+               uchar2 = (uc_b1 << 8) | uc_b2;
+
+               uchar = 0x010000 | ((uchar & 0x3FF) << 10) | (uchar2 & 0x3FF);
+             }
+
+             if (sizeof (json_char) >= sizeof (json_uchar) || (uchar <= 0x7F))
+             {
+               string_add ((json_char) uchar);
+               break;
+             }
+
+             if (uchar <= 0x7FF)
+             {
+               if (state.first_pass)
+                 string_length += 2;
+               else
+               {  string [string_length ++] = 0xC0 | (uchar >> 6);
+                 string [string_length ++] = 0x80 | (uchar & 0x3F);
+               }
+
+               break;
+             }
+
+             if (uchar <= 0xFFFF) {
+               if (state.first_pass)
+                 string_length += 3;
+               else
+               {  string [string_length ++] = 0xE0 | (uchar >> 12);
+                 string [string_length ++] = 0x80 | ((uchar >> 6) & 0x3F);
+                 string [string_length ++] = 0x80 | (uchar & 0x3F);
+               }
+
+               break;
+             }
+
+             if (state.first_pass)
+               string_length += 4;
+             else
+             {  string [string_length ++] = 0xF0 | (uchar >> 18);
+               string [string_length ++] = 0x80 | ((uchar >> 12) & 0x3F);
+               string [string_length ++] = 0x80 | ((uchar >> 6) & 0x3F);
+               string [string_length ++] = 0x80 | (uchar & 0x3F);
+             }
+
+             break;
+
+           default:
+             string_add (b);
+         };
+
+         continue;
+       }
+
+       if (b == '\\')
+       {
+         flags |= flag_escaped;
+         continue;
+       }
+
+       if (b == '"')
+       {
+         if (!state.first_pass)
+           string [string_length] = 0;
+
+         flags &= ~ flag_string;
+         string = 0;
+
+         switch (top->type)
+         {
+           case json_string:
+
+             top->u.string.length = string_length;
+             flags |= flag_next;
+
+             break;
+
+           case json_object:
+
+             if (state.first_pass) {
+               json_char **chars = (json_char **) &top->u.object.values;
+               chars[0] += string_length + 1;
+             }
+             else
+             {
+               top->u.object.values [top->u.object.length].name
+                   = (json_char *) top->_reserved.object_mem;
+
+               top->u.object.values [top->u.object.length].name_length
+                   = string_length;
+
+               (*(json_char **) &top->_reserved.object_mem) += string_length + 1;
+             }
+
+             flags |= flag_seek_value | flag_need_colon;
+             continue;
+
+           default:
+             break;
+         };
+       }
+       else
+       {
+         string_add (b);
+         continue;
+       }
+     }
+
+     if (state.settings.settings & json_enable_comments)
+     {
+       if (flags & (flag_line_comment | flag_block_comment))
+       {
+         if (flags & flag_line_comment)
+         {
+           if (b == '\r' || b == '\n' || !b)
+           {
+             flags &= ~ flag_line_comment;
+             -- state.ptr;  /* so null can be reproc'd */
+           }
+
+           continue;
+         }
+
+         if (flags & flag_block_comment)
+         {
+           if (!b)
+           {  sprintf (error, "%u:%u: Unexpected EOF in block comment", line_and_col);
+             goto e_failed;
+           }
+
+           if (b == '*' && state.ptr < (end - 1) && state.ptr [1] == '/')
+           {
+             flags &= ~ flag_block_comment;
+             ++ state.ptr;  /* skip closing sequence */
+           }
+
+           continue;
+         }
+       }
+       else if (b == '/')
+       {
+         if (! (flags & (flag_seek_value | flag_done)) && top->type != json_object)
+         {  sprintf (error, "%u:%u: Comment not allowed here", line_and_col);
+           goto e_failed;
+         }
+
+         if (++ state.ptr == end)
+         {  sprintf (error, "%u:%u: EOF unexpected", line_and_col);
+           goto e_failed;
+         }
+
+         switch (b = *state.ptr)
+         {
+           case '/':
+             flags |= flag_line_comment;
+             continue;
+
+           case '*':
+             flags |= flag_block_comment;
+             continue;
+
+           default:
+             sprintf (error, "%u:%u: Unexpected `%c` in comment opening sequence", line_and_col, b);
+             goto e_failed;
+         };
+       }
+     }
+
+     if (flags & flag_done)
+     {
+       if (!b)
+         break;
+
+       switch (b)
+       {
+       whitespace:
+         continue;
+
+         default:
+
+           sprintf (error, "%u:%u: Trailing garbage: `%c`",
+                   line_and_col, b);
+
+           goto e_failed;
+       };
+     }
+
+     if (flags & flag_seek_value)
+     {
+       switch (b)
+       {
+       whitespace:
+         continue;
+
+         case ']':
+
+           if (top && top->type == json_array)
+             flags = (flags & ~ (flag_need_comma | flag_seek_value)) | flag_next;
+           else
+           {  sprintf (error, "%u:%u: Unexpected `]`", line_and_col);
+             goto e_failed;
+           }
+
+           break;
+
+         default:
+
+           if (flags & flag_need_comma)
+           {
+             if (b == ',')
+             {  flags &= ~ flag_need_comma;
+               continue;
+             }
+             else
+             {
+               sprintf (error, "%u:%u: Expected `,` before `%c`",
+                       line_and_col, b);
+
+               goto e_failed;
+             }
+           }
+
+           if (flags & flag_need_colon)
+           {
+             if (b == ':')
+             {  flags &= ~ flag_need_colon;
+               continue;
+             }
+             else
+             {
+               sprintf (error, "%u:%u: Expected `:` before `%c`",
+                       line_and_col, b);
+
+               goto e_failed;
+             }
+           }
+
+           flags &= ~ flag_seek_value;
+
+           switch (b)
+           {
+             case '{':
+
+               if (!new_value (&state, &top, &root, &alloc, json_object))
+                 goto e_alloc_failure;
+
+               continue;
+
+             case '[':
+
+               if (!new_value (&state, &top, &root, &alloc, json_array))
+                 goto e_alloc_failure;
+
+               flags |= flag_seek_value;
+               continue;
+
+             case '"':
+
+               if (!new_value (&state, &top, &root, &alloc, json_string))
+                 goto e_alloc_failure;
+
+               flags |= flag_string;
+
+               string = top->u.string.ptr;
+               string_length = 0;
+
+               continue;
+
+             case 't':
+
+               if ((end - state.ptr) <= 3 || *(++ state.ptr) != 'r' ||
+                   *(++ state.ptr) != 'u' || *(++ state.ptr) != 'e')
+               {
+                 goto e_unknown_value;
+               }
+
+               if (!new_value (&state, &top, &root, &alloc, json_boolean))
+                 goto e_alloc_failure;
+
+               top->u.boolean = 1;
+
+               flags |= flag_next;
+               break;
+
+             case 'f':
+
+               if ((end - state.ptr) <= 4 || *(++ state.ptr) != 'a' ||
+                   *(++ state.ptr) != 'l' || *(++ state.ptr) != 's' ||
+                   *(++ state.ptr) != 'e')
+               {
+                 goto e_unknown_value;
+               }
+
+               if (!new_value (&state, &top, &root, &alloc, json_boolean))
+                 goto e_alloc_failure;
+
+               flags |= flag_next;
+               break;
+
+             case 'n':
+
+               if ((end - state.ptr) <= 3 || *(++ state.ptr) != 'u' ||
+                   *(++ state.ptr) != 'l' || *(++ state.ptr) != 'l')
+               {
+                 goto e_unknown_value;
+               }
+
+               if (!new_value (&state, &top, &root, &alloc, json_null))
+                 goto e_alloc_failure;
+
+               flags |= flag_next;
+               break;
+
+             default:
+
+               if (isdigit ((unsigned char) b) || b == '-')
+               {
+                 if (!new_value (&state, &top, &root, &alloc, json_integer))
+                   goto e_alloc_failure;
+
+                 if (!state.first_pass)
+                 {
+                   while (isdigit ((unsigned char) b) || b == '+' || b == '-'
+                          || b == 'e' || b == 'E' || b == '.')
+                   {
+                     if ( (++ state.ptr) == end)
+                     {
+                       b = 0;
+                       break;
+                     }
+
+                     b = *state.ptr;
+                   }
+
+                   flags |= flag_next | flag_reproc;
+                   break;
+                 }
+
+                 flags &= ~ (flag_num_negative | flag_num_e |
+                            flag_num_e_got_sign | flag_num_e_negative |
+                            flag_num_zero);
+
+                 num_digits = 0;
+                 num_fraction = 0;
+                 num_e = 0;
+
+                 if (b != '-')
+                 {
+                   flags |= flag_reproc;
+                   break;
+                 }
+
+                 flags |= flag_num_negative;
+                 continue;
+               }
+               else
+               {  sprintf (error, "%u:%u: Unexpected `%c` when seeking value", line_and_col, b);
+                 goto e_failed;
+               }
+           };
+       };
+     }
+     else
+     {
+       switch (top->type)
+       {
+         case json_object:
+
+           switch (b)
+           {
+           whitespace:
+             continue;
+
+             case '"':
+
+               if (flags & flag_need_comma)
+               {  sprintf (error, "%u:%u: Expected `,` before `\"`", line_and_col);
+                 goto e_failed;
+               }
+
+               flags |= flag_string;
+
+               string = (json_char *) top->_reserved.object_mem;
+               string_length = 0;
+
+               break;
+
+             case '}':
+
+               flags = (flags & ~ flag_need_comma) | flag_next;
+               break;
+
+             case ',':
+
+               if (flags & flag_need_comma)
+               {
+                 flags &= ~ flag_need_comma;
+                 break;
+               } /* FALLTHRU */
+
+             default:
+               sprintf (error, "%u:%u: Unexpected `%c` in object", line_and_col, b);
+               goto e_failed;
+           };
+
+           break;
+
+         case json_integer:
+         case json_double:
+
+           if (isdigit ((unsigned char)b))
+           {
+             ++ num_digits;
+
+             if (top->type == json_integer || flags & flag_num_e)
+             {
+               if (! (flags & flag_num_e))
+               {
+                 if (flags & flag_num_zero)
+                 {  sprintf (error, "%u:%u: Unexpected `0` before `%c`", line_and_col, b);
+                   goto e_failed;
+                 }
+
+                 if (num_digits == 1 && b == '0')
+                   flags |= flag_num_zero;
+               }
+               else
+               {
+                 flags |= flag_num_e_got_sign;
+                 num_e = (num_e * 10) + (b - '0');
+                 continue;
+               }
+
+               if (would_overflow(top->u.integer, b))
+               {
+                 json_int_t integer = top->u.integer;
+                 -- num_digits;
+                 -- state.ptr;
+                 top->type = json_double;
+                 top->u.dbl = (double)integer;
+                 continue;
+               }
+
+               top->u.integer = (top->u.integer * 10) + (b - '0');
+               continue;
+             }
+
+             if (flags & flag_num_got_decimal)
+               num_fraction = (num_fraction * 10) + (b - '0');
+             else
+               top->u.dbl = (top->u.dbl * 10) + (b - '0');
+
+             continue;
+           }
+
+           if (b == '+' || b == '-')
+           {
+             if ( (flags & flag_num_e) && !(flags & flag_num_e_got_sign))
+             {
+               flags |= flag_num_e_got_sign;
+
+               if (b == '-')
+                 flags |= flag_num_e_negative;
+
+               continue;
+             }
+           }
+           else if (b == '.' && top->type == json_integer)
+           {
+             json_int_t integer = top->u.integer;
+
+             if (!num_digits)
+             {  sprintf (error, "%u:%u: Expected digit before `.`", line_and_col);
+               goto e_failed;
+             }
+
+             top->type = json_double;
+             top->u.dbl = (double) integer;
+
+             flags |= flag_num_got_decimal;
+             num_digits = 0;
+             continue;
+           }
+
+           if (! (flags & flag_num_e))
+           {
+             if (top->type == json_double)
+             {
+               if (!num_digits)
+               {  sprintf (error, "%u:%u: Expected digit after `.`", line_and_col);
+                 goto e_failed;
+               }
+
+               top->u.dbl += num_fraction / pow (10.0, num_digits);
+             }
+
+             if (b == 'e' || b == 'E')
+             {
+               flags |= flag_num_e;
+
+               if (top->type == json_integer)
+               {
+                 json_int_t integer = top->u.integer;
+                 top->type = json_double;
+                 top->u.dbl = (double) integer;
+               }
+
+               num_digits = 0;
+               flags &= ~ flag_num_zero;
+
+               continue;
+             }
+           }
+           else
+           {
+             if (!num_digits)
+             {  sprintf (error, "%u:%u: Expected digit after `e`", line_and_col);
+               goto e_failed;
+             }
+
+             top->u.dbl *= pow (10.0, (flags & flag_num_e_negative ? - num_e : num_e));
+           }
+
+           if (flags & flag_num_negative)
+           {
+             if (top->type == json_integer)
+               top->u.integer = - top->u.integer;
+             else
+               top->u.dbl = - top->u.dbl;
+           }
+
+           flags |= flag_next | flag_reproc;
+           break;
+
+         default:
+           break;
+       };
+     }
+
+     if (flags & flag_reproc)
+     {
+       flags &= ~ flag_reproc;
+       -- state.ptr;
+     }
+
+     if (flags & flag_next)
+     {
+       flags = (flags & ~ flag_next) | flag_need_comma;
+
+       if (!top->parent)
+       {
+         /* root value done */
+
+         flags |= flag_done;
+         continue;
+       }
+
+       if (top->parent->type == json_array)
+         flags |= flag_seek_value;
+
+       if (!state.first_pass)
+       {
+         json_value * parent = top->parent;
+
+         switch (parent->type)
+         {
+           case json_object:
+
+             parent->u.object.values
+                 [parent->u.object.length].value = top;
+
+             break;
+
+           case json_array:
+
+             parent->u.array.values
+                 [parent->u.array.length] = top;
+
+             break;
+
+           default:
+             break;
+         };
+       }
+
+       if ( (++ top->parent->u.array.length) > UINT_MAX - 8)
+         goto e_overflow;
+
+       top = top->parent;
+
+       continue;
+     }
+   }
+
+   alloc = root;
+ }
+
+ return root;
+
+e_unknown_value:
+
+ sprintf (error, "%u:%u: Unknown value", line_and_col);
+ goto e_failed;
+
+e_alloc_failure:
+
+ strcpy (error, "Memory allocation failure");
+ goto e_failed;
+
+e_overflow:
+
+ sprintf (error, "%u:%u: Too long (caught overflow)", line_and_col);
+ goto e_failed;
+
+e_failed:
+
+ if (error_buf)
+ {
+   if (*error)
+     strcpy (error_buf, error);
+   else
+     strcpy (error_buf, "Unknown error");
+ }
+
+ if (state.first_pass)
+   alloc = root;
+
+ while (alloc)
+ {
+   top = alloc->_reserved.next_alloc;
+   state.settings.mem_free (alloc, state.settings.user_data);
+   alloc = top;
+ }
+
+ if (!state.first_pass)
+   json_value_free_ex (&state.settings, root);
+
+ return 0;
 }
-#endif /* TIME_ENABLE */
 
-static int json_internal_read_object(const char *cp,
-				     const struct json_attr_t *attrs,
-				     const struct json_array_t *parent,
-				     int offset,
-				     const char **end)
+json_value * json_parse (const json_char * json, size_t length)
 {
-    enum
-    { init, await_attr, in_attr, await_value, in_val_string,
-	in_escape, in_val_token, post_val, post_element
-    } state = 0;
-#ifdef DEBUG_ENABLE
-    char *statenames[] = {
-	"init", "await_attr", "in_attr", "await_value", "in_val_string",
-	"in_escape", "in_val_token", "post_val", "post_element",
-    };
-#endif /* DEBUG_ENABLE */
-    char attrbuf[JSON_ATTR_MAX + 1], *pattr = NULL;
-    char valbuf[JSON_VAL_MAX + 1], *pval = NULL;
-    bool value_quoted = false;
-    char uescape[5];		/* enough space for 4 hex digits and a NUL */
-    const struct json_attr_t *cursor;
-    int substatus, n, maxlen = 0;
-    unsigned int u;
-    const struct json_enum_t *mp;
-    char *lptr;
-
-    if (end != NULL)
-	*end = NULL;	/* give it a well-defined value on parse failure */
-
-    /* stuff fields with defaults in case they're omitted in the JSON input */
-    for (cursor = attrs; cursor->attribute != NULL; cursor++)
-	if (!cursor->nodefault) {
-	    lptr = json_target_address(cursor, parent, offset);
-	    if (lptr != NULL)
-		switch (cursor->type) {
-		case t_integer:
-		    memcpy(lptr, &cursor->dflt.integer, sizeof(int));
-		    break;
-		case t_uinteger:
-		    memcpy(lptr, &cursor->dflt.uinteger, sizeof(unsigned int));
-		    break;
-		case t_short:
-		    memcpy(lptr, &cursor->dflt.shortint, sizeof(short));
-		    break;
-		case t_ushort:
-		    memcpy(lptr, &cursor->dflt.ushortint,
-		           sizeof(unsigned short));
-		    break;
-		case t_time:
-		case t_real:
-		    memcpy(lptr, &cursor->dflt.real, sizeof(double));
-		    break;
-		case t_string:
-		    if (parent != NULL
-			&& parent->element_type != t_structobject
-			&& offset > 0)
-			return JSON_ERR_NOPARSTR;
-		    lptr[0] = '\0';
-		    break;
-		case t_boolean:
-		    memcpy(lptr, &cursor->dflt.boolean, sizeof(bool));
-		    break;
-		case t_character:
-		    lptr[0] = cursor->dflt.character;
-		    break;
-		case t_object:	/* silences a compiler warning */
-		case t_structobject:
-		case t_array:
-		case t_check:
-		case t_ignore:
-		    break;
-		}
-	}
-
-    json_debug_trace((1, "JSON parse of '%s' begins.\n", cp));
-
-    /* parse input JSON */
-    for (; *cp != '\0'; cp++) {
-	json_debug_trace((2, "State %-14s, looking at '%c' (%p)\n",
-			  statenames[state], *cp, cp));
-	switch (state) {
-	case init:
-	    if (isspace((unsigned char) *cp))
-		continue;
-	    else if (*cp == '{')
-		state = await_attr;
-	    else {
-		json_debug_trace((1,
-				  "Non-WS when expecting object start.\n"));
-		if (end != NULL)
-		    *end = cp;
-		return JSON_ERR_OBSTART;
-	    }
-	    break;
-	case await_attr:
-	    if (isspace((unsigned char) *cp))
-		continue;
-	    else if (*cp == '"') {
-		state = in_attr;
-		pattr = attrbuf;
-		if (end != NULL)
-		    *end = cp;
-	    } else if (*cp == '}')
-		break;
-	    else {
-		json_debug_trace((1, "Non-WS when expecting attribute.\n"));
-		if (end != NULL)
-		    *end = cp;
-		return JSON_ERR_ATTRSTART;
-	    }
-	    break;
-	case in_attr:
-	    if (pattr == NULL)
-		/* don't update end here, leave at attribute start */
-		return JSON_ERR_NULLPTR;
-	    if (*cp == '"') {
-		*pattr++ = '\0';
-		json_debug_trace((1, "Collected attribute name %s\n",
-				  attrbuf));
-		for (cursor = attrs; cursor->attribute != NULL; cursor++) {
-		    json_debug_trace((2, "Checking against %s\n",
-				      cursor->attribute));
-		    if (strcmp(cursor->attribute, attrbuf) == 0)
-			break;
-		    if (strcmp(cursor->attribute, "") == 0 &&
-			    cursor->type == t_ignore) {
-			break;
-		    }
-		}
-		if (cursor->attribute == NULL) {
-		    json_debug_trace((1,
-				      "Unknown attribute name '%s'"
-                                      " (attributes begin with '%s').\n",
-				      attrbuf, attrs->attribute));
-		    /* don't update end here, leave at attribute start */
-		    return JSON_ERR_BADATTR;
-		}
-		state = await_value;
-		if (cursor->type == t_string)
-		    maxlen = (int)cursor->len - 1;
-		else if (cursor->type == t_check)
-		    maxlen = (int)strlen(cursor->dflt.check);
-		else if (cursor->type == t_time || cursor->type == t_ignore)
-		    maxlen = JSON_VAL_MAX;
-		else if (cursor->map != NULL)
-		    maxlen = (int)sizeof(valbuf) - 1;
-		pval = valbuf;
-	    } else if (pattr >= attrbuf + JSON_ATTR_MAX - 1) {
-		json_debug_trace((1, "Attribute name too long.\n"));
-		/* don't update end here, leave at attribute start */
-		return JSON_ERR_ATTRLEN;
-	    } else
-		*pattr++ = *cp;
-	    break;
-	case await_value:
-	    if (isspace((unsigned char) *cp) || *cp == ':')
-		continue;
-	    else if (*cp == '[') {
-		if (cursor->type != t_array) {
-		    json_debug_trace((1,
-				      "Saw [ when not expecting array.\n"));
-		    if (end != NULL)
-			*end = cp;
-		    return JSON_ERR_NOARRAY;
-		}
-		substatus = json_read_array(cp, &cursor->addr.array, &cp);
-		if (substatus != 0)
-		    return substatus;
-		state = post_element;
-	    } else if (cursor->type == t_array) {
-		json_debug_trace((1,
-				  "Array element was specified, but no [.\n"));
-		if (end != NULL)
-		    *end = cp;
-		return JSON_ERR_NOBRAK;
-	    } else if (*cp == '{') {
-		if (cursor->type != t_object) {
-		    json_debug_trace((1,
-				      "Saw { when not expecting object.\n"));
-		    if (end != NULL)
-			*end = cp;
-		    return JSON_ERR_NOARRAY;
-		}
-		substatus = json_read_object(cp, cursor->addr.attrs, &cp);
-		if (substatus != 0)
-		    return substatus;
-		--cp;	// last } will be re-consumed by cp++ at end of loop
-		state = post_element;
-	    } else if (cursor->type == t_object) {
-		json_debug_trace((1,
-				  "Object element was specified, but no {.\n"));
-		if (end != NULL)
-		    *end = cp;
-		return JSON_ERR_NOCURLY;
-	    } else if (*cp == '"') {
-		value_quoted = true;
-		state = in_val_string;
-		pval = valbuf;
-	    } else {
-		value_quoted = false;
-		state = in_val_token;
-		pval = valbuf;
-		*pval++ = *cp;
-	    }
-	    break;
-	case in_val_string:
-	    if (pval == NULL)
-		/* don't update end here, leave at value start */
-		return JSON_ERR_NULLPTR;
-	    if (*cp == '\\')
-		state = in_escape;
-	    else if (*cp == '"') {
-		*pval++ = '\0';
-		json_debug_trace((1, "Collected string value %s\n", valbuf));
-		state = post_val;
-	    } else if (pval > valbuf + JSON_VAL_MAX - 1
-		       || pval > valbuf + maxlen) {
-		json_debug_trace((1, "String value too long.\n"));
-		/* don't update end here, leave at value start */
-		return JSON_ERR_STRLONG;	/*  */
-	    } else
-		*pval++ = *cp;
-	    break;
-	case in_escape:
-	    if (pval == NULL)
-		/* don't update end here, leave at value start */
-		return JSON_ERR_NULLPTR;
-	    else if (pval > valbuf + JSON_VAL_MAX - 1
-		       || pval > valbuf + maxlen) {
-		json_debug_trace((1, "String value too long.\n"));
-		/* don't update end here, leave at value start */
-		return JSON_ERR_STRLONG;	/*  */
-	    }
-	    switch (*cp) {
-	    case 'b':
-		*pval++ = '\b';
-		break;
-	    case 'f':
-		*pval++ = '\f';
-		break;
-	    case 'n':
-		*pval++ = '\n';
-		break;
-	    case 'r':
-		*pval++ = '\r';
-		break;
-	    case 't':
-		*pval++ = '\t';
-		break;
-	    case 'u':
-                cp++;                   /* skip the 'u' */
-		for (n = 0; n < 4 && isxdigit(*cp); n++)
-		    uescape[n] = *cp++;
-                uescape[n] = '\0';      /* terminate */
-		--cp;
-                /* ECMA-404 says JSON \u must have 4 hex digits */
-		if ((4 != n) || (1 != sscanf(uescape, "%4x", &u))) {
-		    return JSON_ERR_BADSTRING;
-                }
-		*pval++ = (unsigned char)u;  /* truncate values above 0xff */
-		break;
-	    default:		/* handles double quote and solidus */
-		*pval++ = *cp;
-		break;
-	    }
-	    state = in_val_string;
-	    break;
-	case in_val_token:
-	    if (pval == NULL)
-		/* don't update end here, leave at value start */
-		return JSON_ERR_NULLPTR;
-	    if (isspace((unsigned char) *cp) || *cp == ',' || *cp == '}') {
-		*pval = '\0';
-		json_debug_trace((1, "Collected token value %s.\n", valbuf));
-		state = post_val;
-		if (*cp == '}' || *cp == ',')
-		    --cp;
-	    } else if (pval > valbuf + JSON_VAL_MAX - 1) {
-		json_debug_trace((1, "Token value too long.\n"));
-		/* don't update end here, leave at value start */
-		return JSON_ERR_TOKLONG;
-	    } else
-		*pval++ = *cp;
-	    break;
-	case post_val:
-	    // Ignore whitespace after either string or token values.
-	    if (isspace(*cp)) {
-		    while (*cp != '\0' && isspace((unsigned char) *cp)) {
-			++cp;
-		    }
-		    json_debug_trace((1, "Skipped trailing whitespace: value \"%s\"\n", valbuf));
-	    }
-	    /*
-	     * We know that cursor points at the first spec matching
-	     * the current attribute.  We don't know that it's *the*
-	     * correct spec; our dialect allows there to be any number
-	     * of adjacent ones with the same attrname but different
-	     * types.  Here's where we try to seek forward for a
-	     * matching type/attr pair if we're not looking at one.
-	     */
-	    for (;;) {
-		int seeking = cursor->type;
-		if (value_quoted && (cursor->type == t_string
-                    || cursor->type == t_time))
-		    break;
-		if ((strcmp(valbuf, "true")==0 || strcmp(valbuf, "false")==0
-			|| isdigit((unsigned char) valbuf[0]))
-			&& seeking == t_boolean)
-		    break;
-		if (isdigit((unsigned char) valbuf[0])) {
-		    bool decimal = strchr(valbuf, '.') != NULL;
-		    if (decimal && seeking == t_real)
-			break;
-		    if (!decimal && (seeking == t_integer
-                                     || seeking == t_uinteger))
-			break;
-		}
-		if (cursor[1].attribute==NULL)	/* out of possiblities */
-		    break;
-		if (strcmp(cursor[1].attribute, attrbuf)!=0)
-		    break;
-		++cursor;
-	    }
-	    if (value_quoted
-		&& (cursor->type != t_string && cursor->type != t_character
-		    && cursor->type != t_check && cursor->type != t_time
-		    && cursor->type != t_ignore && cursor->map == 0)) {
-		json_debug_trace((1, "Saw quoted value when expecting"
-                                  " non-string.\n"));
-		return JSON_ERR_QNONSTRING;
-	    }
-	    if (!value_quoted
-		&& (cursor->type == t_string || cursor->type == t_check
-		    || cursor->type == t_time || cursor->map != 0)) {
-		json_debug_trace((1, "Didn't see quoted value when expecting"
-                                  " string.\n"));
-		return JSON_ERR_NONQSTRING;
-	    }
-	    if (cursor->map != 0) {
-		for (mp = cursor->map; mp->name != NULL; mp++)
-		    if (strcmp(mp->name, valbuf) == 0) {
-			goto foundit;
-		    }
-		json_debug_trace((1, "Invalid enumerated value string \"%s\".\n",
-				  valbuf));
-		return JSON_ERR_BADENUM;
-	      foundit:
-		(void)snprintf(valbuf, sizeof(valbuf), "%d", mp->value);
-	    }
-	    lptr = json_target_address(cursor, parent, offset);
-	    if (lptr != NULL)
-		switch (cursor->type) {
-		case t_integer:
-		    {
-			int tmp = atoi(valbuf);
-			memcpy(lptr, &tmp, sizeof(int));
-		    }
-		    break;
-		case t_uinteger:
-		    {
-			unsigned int tmp = (unsigned int)atoi(valbuf);
-			memcpy(lptr, &tmp, sizeof(unsigned int));
-		    }
-		    break;
-		case t_short:
-		    {
-			short tmp = atoi(valbuf);
-			memcpy(lptr, &tmp, sizeof(short));
-		    }
-		    break;
-		case t_ushort:
-		    {
-			unsigned short tmp = (unsigned int)atoi(valbuf);
-			memcpy(lptr, &tmp, sizeof(unsigned short));
-		    }
-		    break;
-		case t_time:
-#ifdef TIME_ENABLE
-		    {
-			double tmp = iso8601_to_unix(valbuf);
-			memcpy(lptr, &tmp, sizeof(double));
-		    }
-#endif /* TIME_ENABLE */
-		    break;
-		case t_real:
-		    {
-			double tmp = atof(valbuf);
-			memcpy(lptr, &tmp, sizeof(double));
-		    }
-		    break;
-		case t_string:
-		    if (parent != NULL
-			&& parent->element_type != t_structobject
-			&& offset > 0)
-			return JSON_ERR_NOPARSTR;
-		    else {
-			size_t vl = strlen(valbuf), cl = cursor->len-1;
-			memset(lptr, '\0', cl);
-			memcpy(lptr, valbuf, vl < cl ? vl : cl);
-		    }
-		    break;
-		case t_boolean:
-		    {
-			bool tmp = (strcmp(valbuf, "true") == 0 || strtol(valbuf, NULL, 0));
-			memcpy(lptr, &tmp, sizeof(bool));
-		    }
-		    break;
-		case t_character:
-		    if (strlen(valbuf) > 1)
-			/* don't update end here, leave at value start */
-			return JSON_ERR_STRLONG;
-		    else
-			lptr[0] = valbuf[0];
-		    break;
-		case t_ignore:	/* silences a compiler warning */
-		case t_object:	/* silences a compiler warning */
-		case t_structobject:
-		case t_array:
-		    break;
-		case t_check:
-		    if (strcmp(cursor->dflt.check, valbuf) != 0) {
-			json_debug_trace((1, "Required attribute value %s"
-                                          " not present.\n",
-					  cursor->dflt.check));
-			/* don't update end here, leave at start of attribute */
-			return JSON_ERR_CHECKFAIL;
-		    }
-		    break;
-		}
-	    __attribute__ ((fallthrough));
-	case post_element:
-	    if (isspace((unsigned char) *cp))
-		continue;
-	    else if (*cp == ',')
-		state = await_attr;
-	    else if (*cp == '}') {
-		++cp;
-		goto good_parse;
-	    } else {
-		json_debug_trace((1, "Garbage while expecting comma or }\n"));
-		if (end != NULL)
-		    *end = cp;
-		return JSON_ERR_BADTRAIL;
-	    }
-	    break;
-	}
-    }
-
-  good_parse:
-    /* in case there's another object following, consume trailing WS */
-    while (*cp != '\0' && isspace((unsigned char) *cp))
-	++cp;
-    if (end != NULL)
-	*end = cp;
-    json_debug_trace((1, "JSON parse ends.\n"));
-    return 0;
+ json_settings settings = { 0 };
+ return json_parse_ex (&settings, json, length, 0);
 }
 
-int json_read_array(const char *cp, const struct json_array_t *arr,
-		    const char **end)
+void json_value_free_ex (json_settings * settings, json_value * value)
 {
-    int substatus, offset, arrcount;
-    char *tp;
+ json_value * cur_value;
 
-    if (end != NULL)
-	*end = NULL;	/* give it a well-defined value on parse failure */
+ if (!value)
+   return;
 
-    json_debug_trace((1, "Entered json_read_array()\n"));
+ value->parent = 0;
 
-    while (isspace((unsigned char) *cp))
-	cp++;
-    if (*cp != '[') {
-	json_debug_trace((1, "Didn't find expected array start\n"));
-	return JSON_ERR_ARRAYSTART;
-    } else
-	cp++;
+ while (value)
+ {
+   switch (value->type)
+   {
+     case json_array:
 
-    tp = arr->arr.strings.store;
-    arrcount = 0;
+       if (!value->u.array.length)
+       {
+         settings->mem_free (value->u.array.values, settings->user_data);
+         break;
+       }
 
-    /* Check for empty array */
-    while (isspace((unsigned char) *cp))
-	cp++;
-    if (*cp == ']')
-	goto breakout;
+       value = value->u.array.values [-- value->u.array.length];
+       continue;
 
-    for (offset = 0; offset < arr->maxlen; offset++) {
-	char *ep = NULL;
-	json_debug_trace((1, "Looking at %s\n", cp));
-	switch (arr->element_type) {
-	case t_string:
-	    if (isspace((unsigned char) *cp))
-		cp++;
-	    if (*cp != '"')
-		return JSON_ERR_BADSTRING;
-	    else
-		++cp;
-	    arr->arr.strings.ptrs[offset] = tp;
-	    for (; tp - arr->arr.strings.store < arr->arr.strings.storelen;
-		 tp++)
-		if (*cp == '"') {
-		    ++cp;
-		    *tp++ = '\0';
-		    goto stringend;
-		} else if (*cp == '\0') {
-		    json_debug_trace((1,
-				      "Bad string syntax in string list.\n"));
-		    return JSON_ERR_BADSTRING;
-		} else {
-		    *tp = *cp++;
-		}
-	    json_debug_trace((1, "Bad string syntax in string list.\n"));
-	    return JSON_ERR_BADSTRING;
-	  stringend:
-	    break;
-	case t_object:
-	case t_structobject:
-	    substatus =
-		json_internal_read_object(cp, arr->arr.objects.subtype, arr,
-					  offset, &cp);
-	    if (substatus != 0) {
-		if (end != NULL)
-		    end = &cp;
-		return substatus;
-	    }
-	    break;
-	case t_integer:
-	    arr->arr.integers.store[offset] = (int)strtol(cp, &ep, 0);
-	    if (ep == cp)
-		return JSON_ERR_BADNUM;
-	    else
-		cp = ep;
-	    break;
-	case t_uinteger:
-	    arr->arr.uintegers.store[offset] = (unsigned int)strtoul(cp,
-                                                                     &ep, 0);
-	    if (ep == cp)
-		return JSON_ERR_BADNUM;
-	    else
-		cp = ep;
-	    break;
-	case t_short:
-	    arr->arr.shorts.store[offset] = (short)strtol(cp, &ep, 0);
- 	    if (ep == cp)
- 		return JSON_ERR_BADNUM;
- 	    else
- 		cp = ep;
- 	    break;
-	case t_ushort:
-	    arr->arr.ushorts.store[offset] = (unsigned short)strtol(cp, &ep, 0);
- 	    if (ep == cp)
- 		return JSON_ERR_BADNUM;
- 	    else
- 		cp = ep;
- 	    break;
-#ifdef TIME_ENABLE
-	case t_time:
-	    if (*cp != '"')
-		return JSON_ERR_BADSTRING;
-	    else
-		++cp;
-	    arr->arr.reals.store[offset] = iso8601_to_unix((char *)cp);
-	    if (arr->arr.reals.store[offset] >= HUGE_VAL)
-		return JSON_ERR_BADNUM;
-	    while (*cp && *cp != '"')
-		cp++;
-	    if (*cp != '"')
-		return JSON_ERR_BADSTRING;
-	    else
-		++cp;
-	    break;
-#endif /* TIME_ENABLE */
-	case t_real:
-	    arr->arr.reals.store[offset] = strtod(cp, &ep);
-	    if (ep == cp)
-		return JSON_ERR_BADNUM;
-	    else
-		cp = ep;
-	    break;
-	case t_boolean:
-	    if (str_starts_with(cp, "true")) {
-		arr->arr.booleans.store[offset] = true;
-		cp += 4;
-	    }
-	    else if (str_starts_with(cp, "false")) {
-		arr->arr.booleans.store[offset] = false;
-		cp += 5;
-	    } else {
-		int val = strtol(cp, &ep, 0);
-		if (ep == cp)
-		    return JSON_ERR_BADNUM;
-		else {
-		    arr->arr.booleans.store[offset] = (bool) val;
-		    cp = ep;
-		}
-	    }
-	    break;
-	case t_character:
-	case t_array:
-	case t_check:
-	case t_ignore:
-	    json_debug_trace((1, "Invalid array subtype.\n"));
-	    return JSON_ERR_SUBTYPE;
-	}
-	arrcount++;
-	if (isspace((unsigned char) *cp))
-	    cp++;
-	if (*cp == ']') {
-	    json_debug_trace((1, "End of array found.\n"));
-	    goto breakout;
-	} else if (*cp == ',')
-	    cp++;
-	else {
-	    json_debug_trace((1, "Bad trailing syntax on array.\n"));
-	    return JSON_ERR_BADSUBTRAIL;
-	}
-    }
-    json_debug_trace((1, "Too many elements in array.\n"));
-    if (end != NULL)
-	*end = cp;
-    return JSON_ERR_SUBTOOLONG;
-  breakout:
-    if (arr->count != NULL)
-	*(arr->count) = arrcount;
-    if (end != NULL)
-	*end = cp;
-    json_debug_trace((1, "leaving json_read_array() with %d elements\n",
-		      arrcount));
-    return 0;
+     case json_object:
+
+       if (!value->u.object.length)
+       {
+         settings->mem_free (value->u.object.values, settings->user_data);
+         break;
+       }
+
+       value = value->u.object.values [-- value->u.object.length].value;
+       continue;
+
+     case json_string:
+
+       settings->mem_free (value->u.string.ptr, settings->user_data);
+       break;
+
+     default:
+       break;
+   };
+
+   cur_value = value;
+   value = value->parent;
+   settings->mem_free (cur_value, settings->user_data);
+ }
 }
 
-int json_read_object(const char *cp, const struct json_attr_t *attrs,
-		     const char **end)
+void json_value_free (json_value * value)
 {
-    int st;
-
-    json_debug_trace((1, "json_read_object() sees '%s'\n", cp));
-    st = json_internal_read_object(cp, attrs, NULL, 0, end);
-    return st;
+ json_settings settings = { 0 };
+ settings.mem_free = default_free;
+ json_value_free_ex (&settings, value);
 }
-
-const char *json_error_string(int err)
-{
-    const char *errors[] = {
-	"unknown error while parsing JSON",
-	"non-whitespace when expecting object start",
-	"non-whitespace when expecting attribute start",
-	"unknown attribute name",
-	"attribute name too long",
-	"saw [ when not expecting array",
-	"array element specified, but no [",
-	"string value too long",
-	"token value too long",
-	"garbage while expecting comma or } or ]",
-	"didn't find expected array start",
-	"error while parsing object array",
-	"too many array elements",
-	"garbage while expecting array comma",
-	"unsupported array element type",
-	"error while string parsing",
-	"check attribute not matched",
-	"can't support strings in parallel arrays",
-	"invalid enumerated value",
-	"saw quoted value when expecting nonstring",
-	"didn't see quoted value when expecting string",
-	"other data conversion error",
-	"unexpected null value or attribute pointer",
-	"object element specified, but no {",
-    };
-
-    if (err <= 0 || err >= (int)(sizeof(errors) / sizeof(errors[0])))
-	return errors[0];
-    else
-	return errors[err];
-}
-
-/* end */
-
-
