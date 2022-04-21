@@ -64,11 +64,11 @@ void find_public_and_secret_inputs(const char *testcase_buf, u32 testcase_len,
 
   *public_len = Base64decode_len(raw_public);
   *public_input = malloc(*public_len);
-  *public_len = Base64decode(*public_input, raw_public);
+  *public_len = Base64decode((char *)*public_input, raw_public);
 
   *secret_len = Base64decode_len(raw_secret);
   *secret_input = malloc(*secret_len);
-  *secret_len = Base64decode(*secret_input, raw_secret);
+  *secret_len = Base64decode((char *)*secret_input, raw_secret);
 
   json_value_free(value);
 }
