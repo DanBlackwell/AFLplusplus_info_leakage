@@ -768,6 +768,9 @@ typedef struct afl_state {
 
   struct hashmap *public_input_to_output_map;
 
+  u32 detected_leaks_count;
+  u32 stored_hypertest_leaks_count;
+
 } afl_state_t;
 
 struct custom_mutator {
@@ -1144,6 +1147,7 @@ void   setup_signal_handlers(void);
 void   save_cmdline(afl_state_t *, u32, char **);
 void   read_foreign_testcases(afl_state_t *, int);
 void   write_crash_readme(afl_state_t *afl);
+u8     delete_files(u8 *path, u8 *prefix);
 
 /* CmpLog */
 

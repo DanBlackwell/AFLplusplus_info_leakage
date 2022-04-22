@@ -1453,7 +1453,7 @@ void find_timeout(afl_state_t *afl) {
 /* A helper function for handle_existing_out_dir(), deleting all prefixed
    files in a directory. */
 
-static u8 delete_files(u8 *path, u8 *prefix) {
+u8 delete_files(u8 *path, u8 *prefix) {
 
   DIR *          d;
   struct dirent *d_ent;

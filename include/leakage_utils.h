@@ -35,10 +35,18 @@ u8 leakage_save_if_interesting(afl_state_t *afl,
                                u8 *secret_input_buf, u32 secret_len,
                                u8 fault);
 
+#define SECRET_BUFS_COUNT 2
 struct input_output_hashes {
   u64 public_input_hash;
   u64 secret_input_hash;
   u64 output_hash;
+
+  u8 *public_input_buf;
+  u32 public_input_buf_len;
+
+  u32 secret_input_bufs_filled;
+  u8 *secret_input_bufs[SECRET_BUFS_COUNT];
+  u32 secret_input_buf_len[SECRET_BUFS_COUNT];
 };
 
 uint64_t input_hash(const void *input_str_w_len, uint64_t seed0, uint64_t seed1);
