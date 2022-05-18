@@ -8020,8 +8020,8 @@ havoc_stage:
             u32 clone_from, clone_to, clone_len;
 
             if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
-              clone_len = choose_block_len(afl, new_len);
-              clone_from = rand_below(afl, new_len - clone_len + 1);
+              clone_len = choose_block_len(afl, new_combined_len);
+              clone_from = rand_below(afl, new_combined_len - clone_len + 1);
             } else {
               clone_len = choose_block_len(afl, new_secret_len);
               clone_from = rand_below(afl, new_secret_len - clone_len + 1);
