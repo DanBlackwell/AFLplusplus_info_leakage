@@ -183,7 +183,7 @@ int32_t input_compare(const void *a, const void *b, __attribute__((unused)) void
 
 /* Adds the new queue entry to the cache. */
 
-inline void leakage_queue_testcase_store_mem(afl_state_t *afl, struct queue_entry *q,
+static inline void leakage_queue_testcase_store_mem(afl_state_t *afl, struct queue_entry *q,
                                      u8 *mem) {
 
   u32 len = q->len;

@@ -187,9 +187,9 @@ static int ExecuteFilesOnyByOne(int argc, char **argv) {
 
     if (length > 0) {
 
-      printf("Reading %zu bytes from %s\n", length, argv[i]);
+      // printf("Reading %zu bytes from %s\n", length, argv[i]);
       LLVMFuzzerTestOneInput(buf, length);
-      printf("Execution successful.\n");
+      // printf("Execution successful.\n");
 
     }
 
