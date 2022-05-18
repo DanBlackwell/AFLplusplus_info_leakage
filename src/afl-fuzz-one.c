@@ -7972,6 +7972,7 @@ havoc_stage:
           find_public_and_secret_inputs(new_buf, new_len,
                                         &new_public_buf, &new_public_len,
                                         &new_secret_buf, &new_secret_len);
+          u32 new_combined_len = new_public_len + new_secret_len;
 
           if ((temp_combined_len >= 2 && r % 2) || temp_combined_len + HAVOC_BLK_XL >= MAX_FILE) {
 
@@ -7981,9 +7982,9 @@ havoc_stage:
 
             if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
 
-              copy_len = choose_block_len(afl, new_len - 1);
+              copy_len = choose_block_len(afl, new_combined_len - 1);
               if (copy_len > temp_combined_len) copy_len = temp_combined_len;
-              copy_from = rand_below(afl, new_len - copy_len + 1);
+              copy_from = rand_below(afl, new_combined_len - copy_len + 1);
               copy_to = rand_below(afl, temp_combined_len - copy_len + 1);
 
 #ifdef INTROSPECTION
@@ -7998,7 +7999,7 @@ havoc_stage:
 
               copy_len = choose_block_len(afl, new_secret_len - 1);
               if (copy_len > temp_combined_len) copy_len = temp_combined_len;
-              copy_from = rand_below(afl, new_len - copy_len + 1);
+              copy_from = rand_below(afl, new_combined_len - copy_len + 1);
               copy_to = rand_below(afl, temp_combined_len - copy_len + 1);
 
 #ifdef INTROSPECTION
