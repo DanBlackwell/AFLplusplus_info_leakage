@@ -505,6 +505,7 @@ leakage_save_if_interesting(afl_state_t *afl,
       FATAL("Leakage hunting enabled, but fsrv has no stdout_raw_buffer allocated");
     }
 
+    afl->queue_top->public_output_bufer_len = afl->fsrv.stdout_raw_buffer_len;
     afl->queue_top->public_output_buffer = ck_alloc(afl->fsrv.stdout_raw_buffer_len);
     memcpy(afl->queue_top->public_output_buffer, afl->fsrv.stdout_raw_buffer, afl->fsrv.stdout_raw_buffer_len);
 

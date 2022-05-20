@@ -7997,7 +7997,11 @@ havoc_stage:
 
             } else {
 
-              copy_len = choose_block_len(afl, new_secret_len - 1);
+              if (new_secret_len > 0) {
+                copy_len = choose_block_len(afl, new_secret_len - 1);
+              } else {
+                copy_len = 0;
+              }
               if (copy_len > temp_combined_len) copy_len = temp_combined_len;
               copy_from = rand_below(afl, new_combined_len - copy_len + 1);
               copy_to = rand_below(afl, temp_combined_len - copy_len + 1);
@@ -8124,7 +8128,7 @@ havoc_stage:
     free(tmp);
 
     if (afl->fsrv.stdout_raw_buffer) {
-      if (!afl->queue_cur->public_output_buffer) {
+      if (afl->queue_cur->public_output_bufer_len && !afl->queue_cur->public_output_buffer) {
         FATAL("Don't have the expected output for queued path %u",
               afl->current_entry);
       }
