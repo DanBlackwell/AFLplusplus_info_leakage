@@ -8128,7 +8128,7 @@ havoc_stage:
     free(tmp);
 
     if (afl->fsrv.stdout_raw_buffer) {
-      if (!afl->queue_cur->public_output_buffer) {
+      if (afl->queue_cur->public_output_bufer_len && !afl->queue_cur->public_output_buffer) {
         FATAL("Don't have the expected output for queued path %u",
               afl->current_entry);
       }
