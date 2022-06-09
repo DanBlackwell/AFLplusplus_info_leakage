@@ -5634,14 +5634,14 @@ u8 leakage_fuzz_one_original(afl_state_t *afl) {
   leak_input.json_combined_buf_len = afl->queue_cur->len;
   len = temp_len = afl->queue_cur->len;
 
-  printf("testcase_buf (%d): %.*s\n", leak_input.json_combined_buf_len, leak_input.json_combined_buf_len, leak_input.json_combined_buf);
-  fflush(stdout);
+//  printf("testcase_buf (%d): %.*s\n", leak_input.json_combined_buf_len, leak_input.json_combined_buf_len, leak_input.json_combined_buf);
+//  fflush(stdout);
   find_public_and_secret_inputs(leak_input.json_combined_buf, leak_input.json_combined_buf_len,
                                 &leak_input.orig_public_buf, &leak_input.orig_public_len,
                                 &leak_input.orig_secret_buf, &leak_input.orig_secret_len);
 
-  printf("Public_input (%d): %.*s\n", leak_input.orig_public_len, leak_input.orig_public_len, leak_input.orig_public_buf);
-  printf("Secret_input (%d): %.*s\n", leak_input.orig_secret_len, leak_input.orig_secret_len, leak_input.orig_secret_buf);
+//  printf("Public_input (%d): %.*s\n", leak_input.orig_public_len, leak_input.orig_public_len, leak_input.orig_public_buf);
+//  printf("Secret_input (%d): %.*s\n", leak_input.orig_secret_len, leak_input.orig_secret_len, leak_input.orig_secret_buf);
   fflush(stdout);
 
   afl->subseq_tmouts = 0;
@@ -7966,7 +7966,7 @@ havoc_stage:
           u32                 new_len = target->len;
           u8 *                new_buf = queue_testcase_get(afl, target);
 
-          printf("Fetched queue[%u] for splicing: %.*s\n", tid, new_len, new_buf);
+//          printf("Fetched queue[%u] for splicing: %.*s\n", tid, new_len, new_buf);
           u8 *new_public_buf, *new_secret_buf;
           u32 new_public_len, new_secret_len;
           find_public_and_secret_inputs(new_buf, new_len,
@@ -8115,15 +8115,15 @@ havoc_stage:
       }
     }
 
-    if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
-      printf("Tested (mutate_secret: %d): { L: %.*s, H: %.*s, O: \"%.*s\" }\n",
-             0, temp_public_len, mutate_buf, temp_secret_len, mutate_buf + temp_public_len,
-             tmp_len, tmp);
-    } else {
-      printf("Tested (mutate_secret: %d): { L: %.*s, H: %.*s, O: \"%.*s\" }\n",
-             1, leak_input.mutation_seed_public_len, leak_input.mutation_seed_combined_buf,
-             temp_combined_len, mutate_buf, tmp_len, tmp);
-    }
+//    if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
+//      printf("Tested (mutate_secret: %d): { L: %.*s, H: %.*s, O: \"%.*s\" }\n",
+//             0, temp_public_len, mutate_buf, temp_secret_len, mutate_buf + temp_public_len,
+//             tmp_len, tmp);
+//    } else {
+//      printf("Tested (mutate_secret: %d): { L: %.*s, H: %.*s, O: \"%.*s\" }\n",
+//             1, leak_input.mutation_seed_public_len, leak_input.mutation_seed_combined_buf,
+//             temp_combined_len, mutate_buf, tmp_len, tmp);
+//    }
 
     free(tmp);
 
@@ -8308,7 +8308,7 @@ retry_splicing:
     target = afl->queue_buf[tid];
     new_buf = queue_testcase_get(afl, target);
 
-    printf("Fetched queue[%u] for splicing: %.*s\n", tid, target->len, new_buf);
+//    printf("Fetched queue[%u] for splicing: %.*s\n", tid, target->len, new_buf);
     fflush(stdout);
 
     u8 *public_buf, *secret_buf;
@@ -8348,12 +8348,12 @@ retry_splicing:
 
     split_at = f_diff + rand_below(afl, l_diff - f_diff);
 
-    printf("[SECRET: %u] Combined {p: %.*s, s: %.*s}\nwith {p: %.*s, s: %.*s},\nat pos %u,\n",
-           leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_SECRET,
-           leak_input.mutation_seed_public_len, leak_input.mutation_seed_combined_buf,
-           leak_input.mutation_seed_secret_len,
-           leak_input.mutation_seed_combined_buf + leak_input.mutation_seed_public_len,
-           public_len, combined_buf, secret_len, combined_buf + public_len, split_at);
+//    printf("[SECRET: %u] Combined {p: %.*s, s: %.*s}\nwith {p: %.*s, s: %.*s},\nat pos %u,\n",
+//           leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_SECRET,
+//           leak_input.mutation_seed_public_len, leak_input.mutation_seed_combined_buf,
+//           leak_input.mutation_seed_secret_len,
+//           leak_input.mutation_seed_combined_buf + leak_input.mutation_seed_public_len,
+//           public_len, combined_buf, secret_len, combined_buf + public_len, split_at);
 
     /* Do the thing. */
 
@@ -8396,12 +8396,12 @@ retry_splicing:
 
     ck_free(combined_buf);
 
-    printf("and got: {p: %.*s, s: %.*s}\n",
-           leak_input.mutation_seed_public_len,
-           leak_input.mutation_seed_combined_buf,
-           leak_input.mutation_seed_secret_len,
-           leak_input.mutation_seed_combined_buf + leak_input.mutation_seed_public_len);
-    fflush(stdout);
+//    printf("and got: {p: %.*s, s: %.*s}\n",
+//           leak_input.mutation_seed_public_len,
+//           leak_input.mutation_seed_combined_buf,
+//           leak_input.mutation_seed_secret_len,
+//           leak_input.mutation_seed_combined_buf + leak_input.mutation_seed_public_len);
+//    fflush(stdout);
 
     goto custom_mutator_stage;
 

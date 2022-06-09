@@ -96,9 +96,9 @@ void locate_public_and_secret_inputs(struct queue_entry *q) {
     }
   }
 
-  printf("Locating public and secret inputs in %.*s: secret_input: %.*s, public_input: %.*s\n",
-         q->len, q->testcase_buf, q->secret_input_len, q->secret_input_start,
-         q->public_input_len, q->public_input_start);
+//  printf("Locating public and secret inputs in %.*s: secret_input: %.*s, public_input: %.*s\n",
+//         q->len, q->testcase_buf, q->secret_input_len, q->secret_input_start,
+//         q->public_input_len, q->public_input_start);
 
 }
 
@@ -312,9 +312,9 @@ leakage_save_if_interesting(afl_state_t *afl,
         }
       }
 
-      printf("Adding to io_map: { L: %.*s, H: %.*s, O: \"%.*s\" }\n",
-             public_len, public_input_buf, secret_len, secret_input_buf,
-             tmp_len, tmp);
+//      printf("Adding to io_map: { L: %.*s, H: %.*s, O: \"%.*s\" }\n",
+//             public_len, public_input_buf, secret_len, secret_input_buf,
+//             tmp_len, tmp);
       free(tmp);
     }
 
@@ -509,9 +509,9 @@ leakage_save_if_interesting(afl_state_t *afl,
     afl->queue_top->public_output_buffer = ck_alloc(afl->fsrv.stdout_raw_buffer_len);
     memcpy(afl->queue_top->public_output_buffer, afl->fsrv.stdout_raw_buffer, afl->fsrv.stdout_raw_buffer_len);
 
-    printf("json_combined_buf: %s\n", (char *)combined_buf);
-    printf("public_input: %.*s, secret_input: %.*s\n", public_len, public_input_buf, secret_len, secret_input_buf);
-    printf("public output (%u chars): %.*s\n", afl->fsrv.stdout_raw_buffer_len, afl->fsrv.stdout_raw_buffer_len, afl->fsrv.stdout_raw_buffer);
+//    printf("json_combined_buf: %s\n", (char *)combined_buf);
+//    printf("public_input: %.*s, secret_input: %.*s\n", public_len, public_input_buf, secret_len, secret_input_buf);
+//    printf("public output (%u chars): %.*s\n", afl->fsrv.stdout_raw_buffer_len, afl->fsrv.stdout_raw_buffer_len, afl->fsrv.stdout_raw_buffer);
 
     keeping = 1;
 
