@@ -7826,6 +7826,13 @@ havoc_stage:
 
           if (afl->extras_cnt) {
 
+           u32 buf_len;
+           if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
+              buf_len = temp_combined_len;
+           } else {
+             buf_len = temp_secret_len;
+           }
+
             if (r < 2) {
 
               /* Use the dictionary. */
@@ -7833,9 +7840,9 @@ havoc_stage:
               u32 use_extra = rand_below(afl, afl->extras_cnt);
               u32 extra_len = afl->extras[use_extra].len;
 
-              if (extra_len > temp_combined_len) { break; }
+              if (extra_len > buf_len) { break; }
 
-              u32 insert_at = rand_below(afl, temp_combined_len - extra_len + 1);
+              u32 insert_at = rand_below(afl, buf_len - extra_len + 1);
 #ifdef INTROSPECTION
               snprintf(afl->m_tmp, sizeof(afl->m_tmp), " EXTRA_OVERWRITE-%u-%u",
                        insert_at, extra_len);
@@ -7848,25 +7855,31 @@ havoc_stage:
 
             } else if (r < 4) {
 
+             u32 buf_len;
+             if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
+                buf_len = temp_combined_len;
+             } else {
+               buf_len = temp_secret_len;
+             }
+
               u32 use_extra = rand_below(afl, afl->extras_cnt);
               u32 extra_len = afl->extras[use_extra].len;
-              if (temp_len + extra_len >= MAX_FILE) { break; }
+              if (buf_len + extra_len >= MAX_FILE) { break; }
 
               u8 *ptr = afl->extras[use_extra].data;
-              u32 insert_at = rand_below(afl, temp_combined_len + 1);
+              u32 insert_at = rand_below(afl, buf_len + 1);
 #ifdef INTROSPECTION
               snprintf(afl->m_tmp, sizeof(afl->m_tmp), " EXTRA_INSERT-%u-%u",
                        insert_at, extra_len);
               strcat(afl->mutation, afl->m_tmp);
 #endif
 
-              u8 *new_buf = ck_realloc(leakage_scratch_buf, temp_combined_len + extra_len);
+              u8 *new_buf = ck_realloc(leakage_scratch_buf, buf_len + extra_len);
               if (unlikely(!new_buf)) { PFATAL("alloc"); }
-             memcpy(new_buf, mutate_buf, temp_combined_len);
 
               /* Tail */
               memmove(new_buf + insert_at + extra_len, new_buf + insert_at,
-                      temp_combined_len - insert_at);
+                      buf_len - insert_at);
 
               /* Inserted part */
               memcpy(new_buf + insert_at, ptr, extra_len);
@@ -7877,11 +7890,17 @@ havoc_stage:
 
               temp_combined_len += extra_len;
 
-             if (insert_at < temp_public_len) {
-                temp_public_len += extra_len;
-              } else {
-                temp_secret_len += extra_len;
-              }
+             if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
+               if (insert_at < temp_public_len) {
+                  temp_public_len += extra_len;
+                } else {
+                  temp_secret_len += extra_len;
+                }
+             } else {
+               temp_secret_len += extra_len;
+             }
+
+             printf("ran insert extras_cnt\n");
 
               break;
 
@@ -7902,9 +7921,9 @@ havoc_stage:
               u32 use_extra = rand_below(afl, afl->a_extras_cnt);
               u32 extra_len = afl->a_extras[use_extra].len;
 
-              if (extra_len > temp_len) { break; }
+              if (extra_len > temp_combined_len) { break; }
 
-              u32 insert_at = rand_below(afl, temp_len - extra_len + 1);
+              u32 insert_at = rand_below(afl, temp_combined_len - extra_len + 1);
 #ifdef INTROSPECTION
               snprintf(afl->m_tmp, sizeof(afl->m_tmp),
                        " AUTO_EXTRA_OVERWRITE-%u-%u", insert_at, extra_len);
@@ -7919,10 +7938,10 @@ havoc_stage:
 
               u32 use_extra = rand_below(afl, afl->a_extras_cnt);
               u32 extra_len = afl->a_extras[use_extra].len;
-              if (temp_len + extra_len >= MAX_FILE) { break; }
+              if (temp_combined_len + extra_len >= MAX_FILE) { break; }
 
               u8 *ptr = afl->a_extras[use_extra].data;
-              u32 insert_at = rand_below(afl, temp_len + 1);
+              u32 insert_at = rand_below(afl, temp_combined_len + 1);
 #ifdef INTROSPECTION
               snprintf(afl->m_tmp, sizeof(afl->m_tmp),
                        " AUTO_EXTRA_INSERT-%u-%u", insert_at, extra_len);
@@ -7951,6 +7970,8 @@ havoc_stage:
               } else {
                 temp_secret_len += extra_len;
               }
+
+             printf("ran insert a_extras_cnt\n");
 
               break;
 
