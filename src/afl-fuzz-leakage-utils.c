@@ -126,7 +126,7 @@ void create_buffer_from_public_and_secret_inputs(const uint8_t *public_input, u3
                                encoded_secret);
 
   if (*combined_buf_len >= expected_len) {
-    FATAL("Would expect the output str to be shorter than %u characters, \nRAW: %s", expected_len, *combined_buf);
+    FATAL("Would expect the output str to be shorter than %u characters, was %u chars\nRAW: %s", expected_len, *combined_buf_len, *combined_buf);
   }
 
   ck_free(encoded_public);

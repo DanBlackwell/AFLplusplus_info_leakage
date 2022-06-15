@@ -7826,123 +7826,139 @@ havoc_stage:
 
           if (afl->extras_cnt) {
 
-            if (afl->fsrv.leakage_hunting) {
-              FATAL("Didn't implement extras_cnt for leakage!");
+            if (r < 2) {
+
+              /* Use the dictionary. */
+
+              u32 use_extra = rand_below(afl, afl->extras_cnt);
+              u32 extra_len = afl->extras[use_extra].len;
+
+              if (extra_len > temp_combined_len) { break; }
+
+              u32 insert_at = rand_below(afl, temp_combined_len - extra_len + 1);
+#ifdef INTROSPECTION
+              snprintf(afl->m_tmp, sizeof(afl->m_tmp), " EXTRA_OVERWRITE-%u-%u",
+                       insert_at, extra_len);
+              strcat(afl->mutation, afl->m_tmp);
+#endif
+              memcpy(mutate_buf + insert_at, afl->extras[use_extra].data,
+                     extra_len);
+
+              break;
+
+            } else if (r < 4) {
+
+              u32 use_extra = rand_below(afl, afl->extras_cnt);
+              u32 extra_len = afl->extras[use_extra].len;
+              if (temp_len + extra_len >= MAX_FILE) { break; }
+
+              u8 *ptr = afl->extras[use_extra].data;
+              u32 insert_at = rand_below(afl, temp_combined_len + 1);
+#ifdef INTROSPECTION
+              snprintf(afl->m_tmp, sizeof(afl->m_tmp), " EXTRA_INSERT-%u-%u",
+                       insert_at, extra_len);
+              strcat(afl->mutation, afl->m_tmp);
+#endif
+
+              u8 *new_buf = ck_realloc(leakage_scratch_buf, temp_combined_len + extra_len);
+              if (unlikely(!new_buf)) { PFATAL("alloc"); }
+             memcpy(new_buf, mutate_buf, temp_combined_len);
+
+              /* Tail */
+              memmove(new_buf + insert_at + extra_len, new_buf + insert_at,
+                      temp_combined_len - insert_at);
+
+              /* Inserted part */
+              memcpy(new_buf + insert_at, ptr, extra_len);
+
+             u8 *tmp = mutate_buf;
+             mutate_buf = new_buf;
+             leakage_scratch_buf = tmp;
+
+              temp_combined_len += extra_len;
+
+             if (insert_at < temp_public_len) {
+                temp_public_len += extra_len;
+              } else {
+                temp_secret_len += extra_len;
+              }
+
+              break;
+
+            } else {
+
+              r -= 4;
+
             }
-//
-//            if (r < 2) {
-//
-//              /* Use the dictionary. */
-//
-//              u32 use_extra = rand_below(afl, afl->extras_cnt);
-//              u32 extra_len = afl->extras[use_extra].len;
-//
-//              if (extra_len > temp_len) { break; }
-//
-//              u32 insert_at = rand_below(afl, temp_len - extra_len + 1);
-//#ifdef INTROSPECTION
-//              snprintf(afl->m_tmp, sizeof(afl->m_tmp), " EXTRA_OVERWRITE-%u-%u",
-//                       insert_at, extra_len);
-//              strcat(afl->mutation, afl->m_tmp);
-//#endif
-//              memcpy(out_buf + insert_at, afl->extras[use_extra].data,
-//                     extra_len);
-//
-//              break;
-//
-//            } else if (r < 4) {
-//
-//              u32 use_extra = rand_below(afl, afl->extras_cnt);
-//              u32 extra_len = afl->extras[use_extra].len;
-//              if (temp_len + extra_len >= MAX_FILE) { break; }
-//
-//              u8 *ptr = afl->extras[use_extra].data;
-//              u32 insert_at = rand_below(afl, temp_len + 1);
-//#ifdef INTROSPECTION
-//              snprintf(afl->m_tmp, sizeof(afl->m_tmp), " EXTRA_INSERT-%u-%u",
-//                       insert_at, extra_len);
-//              strcat(afl->mutation, afl->m_tmp);
-//#endif
-//
-//              out_buf = afl_realloc(AFL_BUF_PARAM(out), temp_len + extra_len);
-//              if (unlikely(!out_buf)) { PFATAL("alloc"); }
-//
-//              /* Tail */
-//              memmove(out_buf + insert_at + extra_len, out_buf + insert_at,
-//                      temp_len - insert_at);
-//
-//              /* Inserted part */
-//              memcpy(out_buf + insert_at, ptr, extra_len);
-//              temp_len += extra_len;
-//
-//              break;
-//
-//            } else {
-//
-//              r -= 4;
-//
-//            }
 
           }
 
           if (afl->a_extras_cnt) {
 
-            if (afl->fsrv.leakage_hunting) {
-              FATAL("Didn't implement a_extras_cnt for leakage!");
-            }
+            if (r < 2) {
 
-//            if (r < 2) {
-//
-//              /* Use the dictionary. */
-//
-//              u32 use_extra = rand_below(afl, afl->a_extras_cnt);
-//              u32 extra_len = afl->a_extras[use_extra].len;
-//
-//              if (extra_len > temp_len) { break; }
-//
-//              u32 insert_at = rand_below(afl, temp_len - extra_len + 1);
-//#ifdef INTROSPECTION
-//              snprintf(afl->m_tmp, sizeof(afl->m_tmp),
-//                       " AUTO_EXTRA_OVERWRITE-%u-%u", insert_at, extra_len);
-//              strcat(afl->mutation, afl->m_tmp);
-//#endif
-//              memcpy(out_buf + insert_at, afl->a_extras[use_extra].data,
-//                     extra_len);
-//
-//              break;
-//
-//            } else if (r < 4) {
-//
-//              u32 use_extra = rand_below(afl, afl->a_extras_cnt);
-//              u32 extra_len = afl->a_extras[use_extra].len;
-//              if (temp_len + extra_len >= MAX_FILE) { break; }
-//
-//              u8 *ptr = afl->a_extras[use_extra].data;
-//              u32 insert_at = rand_below(afl, temp_len + 1);
-//#ifdef INTROSPECTION
-//              snprintf(afl->m_tmp, sizeof(afl->m_tmp),
-//                       " AUTO_EXTRA_INSERT-%u-%u", insert_at, extra_len);
-//              strcat(afl->mutation, afl->m_tmp);
-//#endif
-//
-//              out_buf = afl_realloc(AFL_BUF_PARAM(out), temp_len + extra_len);
-//              if (unlikely(!out_buf)) { PFATAL("alloc"); }
-//
-//              /* Tail */
-//              memmove(out_buf + insert_at + extra_len, out_buf + insert_at,
-//                      temp_len - insert_at);
-//
-//              /* Inserted part */
-//              memcpy(out_buf + insert_at, ptr, extra_len);
-//              temp_len += extra_len;
-//
-//              break;
-//
-//            } else {
-//
-//              r -= 4;
-//
-//            }
+              /* Use the dictionary. */
+
+              u32 use_extra = rand_below(afl, afl->a_extras_cnt);
+              u32 extra_len = afl->a_extras[use_extra].len;
+
+              if (extra_len > temp_len) { break; }
+
+              u32 insert_at = rand_below(afl, temp_len - extra_len + 1);
+#ifdef INTROSPECTION
+              snprintf(afl->m_tmp, sizeof(afl->m_tmp),
+                       " AUTO_EXTRA_OVERWRITE-%u-%u", insert_at, extra_len);
+              strcat(afl->mutation, afl->m_tmp);
+#endif
+              memcpy(mutate_buf + insert_at, afl->a_extras[use_extra].data,
+                     extra_len);
+
+              break;
+
+            } else if (r < 4) {
+
+              u32 use_extra = rand_below(afl, afl->a_extras_cnt);
+              u32 extra_len = afl->a_extras[use_extra].len;
+              if (temp_len + extra_len >= MAX_FILE) { break; }
+
+              u8 *ptr = afl->a_extras[use_extra].data;
+              u32 insert_at = rand_below(afl, temp_len + 1);
+#ifdef INTROSPECTION
+              snprintf(afl->m_tmp, sizeof(afl->m_tmp),
+                       " AUTO_EXTRA_INSERT-%u-%u", insert_at, extra_len);
+              strcat(afl->mutation, afl->m_tmp);
+#endif
+
+              u8 *new_buf = ck_realloc(leakage_scratch_buf, temp_combined_len + extra_len);
+              if (unlikely(!new_buf)) { PFATAL("alloc"); }
+             memcpy(new_buf, mutate_buf, temp_combined_len);
+
+              /* Tail */
+              memmove(new_buf + insert_at + extra_len, new_buf + insert_at,
+                      temp_combined_len - insert_at);
+
+              /* Inserted part */
+              memcpy(new_buf + insert_at, ptr, extra_len);
+
+             u8 *tmp = mutate_buf;
+              mutate_buf = new_buf;
+              leakage_scratch_buf = tmp;
+
+              temp_combined_len += extra_len;
+
+             if (insert_at < temp_public_len) {
+                temp_public_len += extra_len;
+              } else {
+                temp_secret_len += extra_len;
+              }
+
+              break;
+
+            } else {
+
+              r -= 4;
+
+            }
 
           }
 
