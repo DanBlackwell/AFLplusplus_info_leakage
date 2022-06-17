@@ -7855,52 +7855,43 @@ havoc_stage:
 
             } else if (r < 4) {
 
-             u32 buf_len;
-             if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
-                buf_len = temp_combined_len;
-             } else {
-               buf_len = temp_secret_len;
-             }
-
               u32 use_extra = rand_below(afl, afl->extras_cnt);
               u32 extra_len = afl->extras[use_extra].len;
-              if (buf_len + extra_len >= MAX_FILE) { break; }
+              if (temp_combined_len + extra_len >= MAX_FILE) { break; }
 
               u8 *ptr = afl->extras[use_extra].data;
-              u32 insert_at = rand_below(afl, buf_len + 1);
+              u32 insert_at = rand_below(afl, temp_combined_len + 1);
 #ifdef INTROSPECTION
               snprintf(afl->m_tmp, sizeof(afl->m_tmp), " EXTRA_INSERT-%u-%u",
                        insert_at, extra_len);
               strcat(afl->mutation, afl->m_tmp);
 #endif
 
-              u8 *new_buf = ck_realloc(leakage_scratch_buf, buf_len + extra_len);
+              u8 *new_buf = ck_realloc(leakage_scratch_buf, temp_combined_len + extra_len);
               if (unlikely(!new_buf)) { PFATAL("alloc"); }
 
               /* Tail */
               memmove(new_buf + insert_at + extra_len, new_buf + insert_at,
-                      buf_len - insert_at);
+                      temp_combined_len - insert_at);
 
               /* Inserted part */
               memcpy(new_buf + insert_at, ptr, extra_len);
 
-             u8 *tmp = mutate_buf;
-             mutate_buf = new_buf;
-             leakage_scratch_buf = tmp;
+              u8 *tmp = mutate_buf;
+              mutate_buf = new_buf;
+              leakage_scratch_buf = tmp;
 
               temp_combined_len += extra_len;
 
-             if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
-               if (insert_at < temp_public_len) {
+              if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
+                if (insert_at < temp_public_len) {
                   temp_public_len += extra_len;
                 } else {
                   temp_secret_len += extra_len;
                 }
-             } else {
-               temp_secret_len += extra_len;
-             }
-
-             printf("ran insert extras_cnt\n");
+              } else {
+                temp_secret_len += extra_len;
+              }
 
               break;
 
@@ -7950,7 +7941,7 @@ havoc_stage:
 
               u8 *new_buf = ck_realloc(leakage_scratch_buf, temp_combined_len + extra_len);
               if (unlikely(!new_buf)) { PFATAL("alloc"); }
-             memcpy(new_buf, mutate_buf, temp_combined_len);
+              memcpy(new_buf, mutate_buf, temp_combined_len);
 
               /* Tail */
               memmove(new_buf + insert_at + extra_len, new_buf + insert_at,
@@ -7959,19 +7950,21 @@ havoc_stage:
               /* Inserted part */
               memcpy(new_buf + insert_at, ptr, extra_len);
 
-             u8 *tmp = mutate_buf;
+              u8 *tmp = mutate_buf;
               mutate_buf = new_buf;
               leakage_scratch_buf = tmp;
 
               temp_combined_len += extra_len;
 
-             if (insert_at < temp_public_len) {
-                temp_public_len += extra_len;
+              if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
+                if (insert_at < temp_public_len) {
+                  temp_public_len += extra_len;
+                } else {
+                  temp_secret_len += extra_len;
+                }
               } else {
                 temp_secret_len += extra_len;
               }
-
-             printf("ran insert a_extras_cnt\n");
 
               break;
 
