@@ -31,6 +31,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
+#include <glob.h>
 
 #include "config.h"
 #include "types.h"
@@ -80,15 +81,15 @@
 /* Allocate a buffer, explicitly not zeroing it. Returns NULL for zero-sized
    requests. */
 
-static inline void *DFL_ck_alloc_nozero(u32 size) {
+static inline void *DFL_ck_alloc_nozero(size_t size) {
 
   void *ret;
 
   if (!size) { return NULL; }
 
-  ALLOC_CHECK_SIZE(size);
+  ALLOC_CHECK_SIZE((u32)size);
   ret = malloc(size);
-  ALLOC_CHECK_RESULT(ret, size);
+  ALLOC_CHECK_RESULT(ret, (u32)size);
 
   return (void *)ret;
 
@@ -97,7 +98,7 @@ static inline void *DFL_ck_alloc_nozero(u32 size) {
 /* Allocate a buffer, returning zeroed memory.
   Returns null for 0 size */
 
-static inline void *DFL_ck_alloc(u32 size) {
+static inline void *DFL_ck_alloc(size_t size) {
 
   void *mem;
 
@@ -123,7 +124,7 @@ static inline void DFL_ck_free(void *mem) {
    With DEBUG_BUILD, the buffer is always reallocated to a new addresses and the
    old memory is clobbered with 0xFF. */
 
-static inline void *DFL_ck_realloc(void *orig, u32 size) {
+static inline void *DFL_ck_realloc(void *orig, size_t size) {
 
   void *ret;
 
@@ -134,14 +135,14 @@ static inline void *DFL_ck_realloc(void *orig, u32 size) {
 
   }
 
-  ALLOC_CHECK_SIZE(size);
+  ALLOC_CHECK_SIZE((u32)size);
 
   /* Catch pointer issues sooner: force relocation and make sure that the
      original buffer is wiped. */
 
   ret = realloc(orig, size);
 
-  ALLOC_CHECK_RESULT(ret, size);
+  ALLOC_CHECK_RESULT(ret, (u32)size);
 
   return (void *)ret;
 
@@ -158,9 +159,9 @@ static inline u8 *DFL_ck_strdup(u8 *str) {
 
   size = strlen((char *)str) + 1;
 
-  ALLOC_CHECK_SIZE(size);
+  ALLOC_CHECK_SIZE((u32)size);
   ret = (u8 *)malloc(size);
-  ALLOC_CHECK_RESULT(ret, size);
+  ALLOC_CHECK_RESULT(ret, (u32)size);
 
   return (u8 *)memcpy(ret, str, size);
 

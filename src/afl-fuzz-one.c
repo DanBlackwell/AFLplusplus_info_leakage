@@ -5540,16 +5540,16 @@ u8 *leakage_scratch_buf = NULL;
 u8 leakage_fuzz_one_original(afl_state_t *afl) {
 
   u32 len, temp_len;
-  u32 j;
+  // u32 j;
   u32 i;
-  u8 *ex_tmp, *eff_map = 0;
-  u64 havoc_queued = 0, orig_hit_cnt, new_hit_cnt = 0, prev_cksum;
-  u32 splice_cycle = 0, perf_score = 100, orig_perf, eff_cnt = 1;
+  // u8 *ex_tmp, *eff_map = 0;
+  u64 havoc_queued = 0, orig_hit_cnt, new_hit_cnt = 0; //, prev_cksum;
+  u32 splice_cycle = 0, perf_score = 100, orig_perf = 0; //, eff_cnt = 1;
 
   u8 ret_val = 1, doing_det = 0;
 
-  u8  a_collect[MAX_AUTO_EXTRA];
-  u32 a_len = 0;
+//  u8  a_collect[MAX_AUTO_EXTRA];
+//  u32 a_len = 0;
 
   enum leakage_fuzz_phase leak_fuzz_phase = LEAKAGE_FUZZ_MUTATE_FULL_INPUT;
 
@@ -5817,7 +5817,7 @@ u8 leakage_fuzz_one_original(afl_state_t *afl) {
   doing_det = 1;
 
   if (afl->fsrv.leakage_hunting) {
-    FATAL("Det3erministic fuzzing not implemented!");
+    FATAL("Deterministic fuzzing not implemented!");
   }
 
   /*********************************************
@@ -5843,7 +5843,7 @@ u8 leakage_fuzz_one_original(afl_state_t *afl) {
 
   orig_hit_cnt = afl->queued_paths + afl->unique_crashes;
 
-  prev_cksum = afl->queue_cur->exec_cksum;
+  // prev_cksum = afl->queue_cur->exec_cksum;
 
 //  for (afl->stage_cur = 0; afl->stage_cur < afl->stage_max; ++afl->stage_cur) {
 //
