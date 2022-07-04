@@ -8118,7 +8118,6 @@ havoc_stage:
       res = leakage_fuzz_stuff(afl,
                                mutate_buf,
                                temp_public_len,
-
                                mutate_buf + temp_public_len,
                                temp_secret_len);
     } else {

@@ -246,6 +246,32 @@ static inline void leakage_queue_testcase_store_mem(afl_state_t *afl, struct que
 
 }
 
+u8 check_for_instability(afl_state_t *afl, const u8 *expected_out_buf, const u32 expected_out_len) {
+  static u8 *expected_out_buf_copy = NULL;
+  static u32 expected_out_len_copy = 0;
+
+  if (expected_out_len > expected_out_len_copy) {
+    expected_out_buf_copy = ck_realloc(expected_out_buf_copy, expected_out_len);
+  }
+  expected_out_len_copy = expected_out_len;
+  memcpy(expected_out_buf_copy, expected_out_buf, expected_out_len);
+
+  for (int i = 0; i < 100; i++) {
+    u8 fault = fuzz_run_target(afl, &afl->fsrv, afl->fsrv.exec_tmout);
+    if (fault) {
+      printf("Discarding potential leaky input as it gave a fault\n");
+      return 1;
+    }
+
+    if (afl->fsrv.stdout_raw_buffer_len != expected_out_len ||
+        memcmp(afl->fsrv.stdout_raw_buffer, expected_out_buf_copy, expected_out_len)) {
+      printf("Discarding potential leaky input as it did not produce a consistent output\n");
+      return 1;
+    }
+  }
+
+  return 0;
+}
 
 /* Check if the result of an execve() during routine fuzzing is interesting,
    save or queue the input test case for further analysis if so. Returns 1 if
@@ -322,82 +348,84 @@ leakage_save_if_interesting(afl_state_t *afl,
     printf("Added to io_map { L: %llu, H: %llu, OUT: %llu }\n",
            sought.public_input_hash, sought.secret_input_hash, sought.output_hash);
 
-  } else if (found->output_hash != output_hash &&
-             found->secret_input_bufs_filled < SECRET_BUFS_COUNT)
-  {
+  } else {
+    u8 unstable = check_for_instability(afl, afl->fsrv.stdout_raw_buffer,
+                                        afl->fsrv.stdout_raw_buffer_len);
 
-    if (!found->public_input_buf) {
-      // Store a copy of the public input
-      found->public_input_buf_len = public_len;
-      found->public_input_buf = ck_alloc(public_len);
-      memcpy(found->public_input_buf, public_input_buf, public_len);
-    }
-
-    // Store a copy of the secret input
-    u32 pos = found->secret_input_bufs_filled;
-    found->secret_input_buf_len[pos] = secret_len;
-    found->secret_input_bufs[pos] = ck_alloc(secret_len);
-    memcpy(found->secret_input_bufs[pos], secret_input_buf, secret_len);
-    found->secret_input_bufs_filled++;
-
-    if (found->secret_input_bufs_filled <= 1) {
-      afl->detected_leaks_count++;
-    } else {
-      char buf[280];
-      snprintf(buf, 280, "%s/leaks", afl->out_dir);
-
-
-      if (!afl->stored_hypertest_leaks_count) {
-        DIR *leaks_dir = opendir(buf);
-
-        if (leaks_dir) {
-          if (delete_files((u8 *)buf, (u8 *)"leak")) {
-            FATAL("Failed to delete files in %s", buf);
-          }
-        }
-
-        if (mkdir(buf, 0777)) { FATAL("Failed to create dir %s", buf); }
-
-        leaks_dir = opendir(buf);
-        if (!leaks_dir) { FATAL("Failed to open dir %s after mkdir??", buf); }
-
-        closedir(leaks_dir);
+    if (!unstable &&
+        found->output_hash != output_hash &&
+        found->secret_input_bufs_filled < SECRET_BUFS_COUNT)
+    {
+      if (!found->public_input_buf) {
+        // Store a copy of the public input
+        found->public_input_buf_len = public_len;
+        found->public_input_buf = ck_alloc(public_len);
+        memcpy(found->public_input_buf, public_input_buf, public_len);
       }
 
-      afl->stored_hypertest_leaks_count++;
+      // Store a copy of the secret input
+      u32 pos = found->secret_input_bufs_filled;
+      found->secret_input_buf_len[pos] = secret_len;
+      found->secret_input_bufs[pos] = ck_alloc(secret_len);
+      memcpy(found->secret_input_bufs[pos], secret_input_buf, secret_len);
+      found->secret_input_bufs_filled++;
 
-      char *leak_input = (char *)alloc_printf("%s/leak_id:%06u,input_1", buf, afl->stored_hypertest_leaks_count);
-      printf("storing to %s\n", leak_input);
-      fd = open(leak_input, O_WRONLY | O_CREAT | O_EXCL, DEFAULT_PERMISSION);
-      if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", leak_input); }
+      if (found->secret_input_bufs_filled <= 1) {
+        afl->detected_leaks_count++;
+      } else {
+        char buf[280];
+        snprintf(buf, 280, "%s/leaks", afl->out_dir);
 
-      char *comb_buf; u32 comb_len;
-      create_buffer_from_public_and_secret_inputs(
-          found->public_input_buf, found->public_input_buf_len,
-          found->secret_input_bufs[0], found->secret_input_buf_len[0],
-          &comb_buf, &comb_len
-      );
-      ck_write(fd, comb_buf, comb_len, leak_input);
-      close(fd);
-      ck_free(comb_buf);
+        if (!afl->stored_hypertest_leaks_count) {
+          DIR *leaks_dir = opendir(buf);
 
+          if (leaks_dir) {
+            if (delete_files((u8 *)buf, (u8 *)"leak")) {
+              FATAL("Failed to delete files in %s", buf);
+            }
+          }
 
-      leak_input = (char *)alloc_printf("%s/leak_id:%06u,input_2", buf, afl->stored_hypertest_leaks_count);
-      printf("storing to %s\n", leak_input);
-      fd = open(leak_input, O_WRONLY | O_CREAT | O_EXCL, DEFAULT_PERMISSION);
-      if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", leak_input); }
+          if (mkdir(buf, 0777)) { FATAL("Failed to create dir %s", buf); }
 
-      create_buffer_from_public_and_secret_inputs(
-          found->public_input_buf, found->public_input_buf_len,
-          found->secret_input_bufs[1], found->secret_input_buf_len[1],
-          &comb_buf, &comb_len
-      );
-      ck_write(fd, comb_buf, comb_len, leak_input);
-      close(fd);
-      ck_free(comb_buf);
+          leaks_dir = opendir(buf);
+          if (!leaks_dir) { FATAL("Failed to open dir %s after mkdir??", buf); }
 
+          closedir(leaks_dir);
+        }
+
+        afl->stored_hypertest_leaks_count++;
+
+        char *leak_input = (char *)alloc_printf(
+            "%s/leak_id:%06u,input_1", buf, afl->stored_hypertest_leaks_count);
+        printf("storing to %s\n", leak_input);
+        fd = open(leak_input, O_WRONLY | O_CREAT | O_EXCL, DEFAULT_PERMISSION);
+        if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", leak_input); }
+
+        char *comb_buf;
+        u32   comb_len;
+        create_buffer_from_public_and_secret_inputs(
+            found->public_input_buf, found->public_input_buf_len,
+            found->secret_input_bufs[0], found->secret_input_buf_len[0],
+            &comb_buf, &comb_len);
+        ck_write(fd, comb_buf, comb_len, leak_input);
+        close(fd);
+        ck_free(comb_buf);
+
+        leak_input = (char *)alloc_printf("%s/leak_id:%06u,input_2", buf,
+                                          afl->stored_hypertest_leaks_count);
+        printf("storing to %s\n", leak_input);
+        fd = open(leak_input, O_WRONLY | O_CREAT | O_EXCL, DEFAULT_PERMISSION);
+        if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", leak_input); }
+
+        create_buffer_from_public_and_secret_inputs(
+            found->public_input_buf, found->public_input_buf_len,
+            found->secret_input_bufs[1], found->secret_input_buf_len[1],
+            &comb_buf, &comb_len);
+        ck_write(fd, comb_buf, comb_len, leak_input);
+        close(fd);
+        ck_free(comb_buf);
+      }
     }
-
   }
 
   if (likely(fault == afl->crash_mode)) {

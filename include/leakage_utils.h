@@ -44,7 +44,7 @@ struct input_output_hashes {
   u8 *public_input_buf;
   u32 public_input_buf_len;
 
-  u32 secret_input_bufs_filled;
+  u8 secret_input_bufs_filled;
   u8 *secret_input_bufs[SECRET_BUFS_COUNT];
   u32 secret_input_buf_len[SECRET_BUFS_COUNT];
 };
