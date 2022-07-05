@@ -1352,7 +1352,7 @@ fsrv_run_result_t afl_fsrv_run_target(afl_forkserver_t *fsrv, u32 timeout,
     do {
       num_bytes = read(fsrv->fsrv_stdout_fd, fsrv->stdout_raw_buffer + len, 65536);
       if (num_bytes == -1) {
-        printf("read failed with errno: %d\n", errno);
+        // printf("read failed with errno: %d\n", errno);
         num_bytes = 0;
         break;
       }

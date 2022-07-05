@@ -28,7 +28,7 @@ void find_public_and_secret_inputs(const char *testcase_buf, u32 testcase_len,
       for (u32 i = 0; i < len; i++) {
 
         char *name = value->u.object.values[i].name;
-        printf("found name %s\n", name);
+        // printf("found name %s\n", name);
 
         json_type type = value->u.object.values[i].value->type;
         if (type != json_string) {
@@ -345,8 +345,8 @@ leakage_save_if_interesting(afl_state_t *afl,
     }
 
     hashmap_set(afl->public_input_to_output_map, &sought);
-    printf("Added to io_map { L: %llu, H: %llu, OUT: %llu }\n",
-           sought.public_input_hash, sought.secret_input_hash, sought.output_hash);
+//    printf("Added to io_map { L: %llu, H: %llu, OUT: %llu }\n",
+//           sought.public_input_hash, sought.secret_input_hash, sought.output_hash);
 
   } else {
     u8 unstable = check_for_instability(afl, afl->fsrv.stdout_raw_buffer,

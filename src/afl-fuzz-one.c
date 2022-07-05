@@ -7248,7 +7248,7 @@ havoc_stage:
 
     if (afl->stage_cur >= afl->stage_max) {
       leak_fuzz_phase = LEAKAGE_FUZZ_MUTATE_SECRET;
-      printf("In LEAKAGE_FUZZ_MUTATE_SECRET phase\n");
+      // printf("In LEAKAGE_FUZZ_MUTATE_SECRET phase\n");
     }
 
     u32 temp_public_len = leak_input.mutation_seed_public_len;
@@ -7989,7 +7989,7 @@ havoc_stage:
 
           } while (tid == afl->current_entry || afl->queue_buf[tid]->len < 4);
 
-          printf("WEIRD splice\n");
+          // printf("WEIRD splice\n");
 
           /* Get the testcase for splicing. */
           struct queue_entry *target = afl->queue_buf[tid];
@@ -8277,7 +8277,7 @@ retry_splicing:
   if (afl->use_splicing && splice_cycle++ < SPLICE_CYCLES &&
       afl->ready_for_splicing_count > 1 && afl->queue_cur->len >= 4) {
 
-    printf("REGULAR splice\n");
+    // printf("REGULAR splice\n");
 //    goto abandon_entry;
 //    FATAL("SPLICING");
 
@@ -8297,8 +8297,8 @@ retry_splicing:
                leak_input.raw_combined_buf_len)
         ) {
 
-      printf("Replacing mutation_seed_combined_buf with raw_combined_buf (len %u)\n",
-             leak_input.raw_combined_buf_len);
+      // printf("Replacing mutation_seed_combined_buf with raw_combined_buf (len %u)\n",
+      //        leak_input.raw_combined_buf_len);
 
       leak_input.mutation_seed_combined_buf = ck_realloc(
           leak_input.mutation_seed_combined_buf,
