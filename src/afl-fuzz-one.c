@@ -8003,6 +8003,14 @@ havoc_stage:
                                         &new_public_buf, &new_public_len,
                                         &new_secret_buf, &new_secret_len);
           u32 new_combined_len = new_public_len + new_secret_len;
+          u8 *new_combined_buf = ck_alloc(new_combined_len);
+
+          memcpy(new_combined_buf, new_public_buf, new_public_len);
+          memcpy(new_combined_buf + new_public_len, new_secret_buf, new_secret_len);
+
+          ck_free(new_public_buf);
+          ck_free(new_secret_buf);
+
 
           if ((temp_combined_len >= 2 && r % 2) || temp_combined_len + HAVOC_BLK_XL >= MAX_FILE) {
 
@@ -8023,7 +8031,7 @@ havoc_stage:
                        copy_len, target->fname);
               strcat(afl->mutation, afl->m_tmp);
 #endif
-              memmove(mutate_buf + copy_to, new_buf + copy_from, copy_len);
+              memmove(mutate_buf + copy_to, new_combined_buf + copy_from, copy_len);
 
             } else {
 
@@ -8042,7 +8050,7 @@ havoc_stage:
                        copy_len, target->fname);
               strcat(afl->mutation, afl->m_tmp);
 #endif
-              memmove(mutate_buf + copy_to, new_buf + copy_from, copy_len);
+              memmove(mutate_buf + copy_to, new_combined_buf + copy_from, copy_len);
 
             }
 
@@ -8077,7 +8085,7 @@ havoc_stage:
 
             /* Inserted part */
 
-            memcpy(temp_buf + clone_to, new_buf + clone_from, clone_len);
+            memcpy(temp_buf + clone_to, new_combined_buf + clone_from, clone_len);
 
             /* Tail */
             memcpy(temp_buf + clone_to + clone_len, mutate_buf + clone_to,
@@ -8101,8 +8109,7 @@ havoc_stage:
 
           }
 
-          ck_free(new_public_buf);
-          ck_free(new_secret_buf);
+          ck_free(new_combined_buf);
 
           break;
 
