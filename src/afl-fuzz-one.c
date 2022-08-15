@@ -5525,6 +5525,7 @@ struct leakage_test_input {
 
 enum leakage_fuzz_phase {
   LEAKAGE_FUZZ_MUTATE_FULL_INPUT,
+  LEAKAGE_FUZZ_MUTATE_PUBLIC,
   LEAKAGE_FUZZ_MUTATE_SECRET
 };
 
@@ -5551,7 +5552,7 @@ u8 leakage_fuzz_one_original(afl_state_t *afl) {
 //  u8  a_collect[MAX_AUTO_EXTRA];
 //  u32 a_len = 0;
 
-  enum leakage_fuzz_phase leak_fuzz_phase = LEAKAGE_FUZZ_MUTATE_FULL_INPUT;
+  enum leakage_fuzz_phase leak_fuzz_phase = LEAKAGE_FUZZ_MUTATE_PUBLIC;
 
 #ifdef IGNORE_FINDS
 
@@ -7242,24 +7243,32 @@ havoc_stage:
 
   }
 
-  u32 leakage_stages = afl->fsrv.leakage_hunting ? afl->stage_max : 0;
+  u32 leakage_stages = afl->fsrv.leakage_hunting ? 2 * afl->stage_max : 0;
 
   for (afl->stage_cur = 0; afl->stage_cur < afl->stage_max + leakage_stages; ++afl->stage_cur) {
 
-    if (afl->stage_cur >= afl->stage_max) {
+    if (afl->stage_cur >= afl->stage_max + leakage_stages) {
       leak_fuzz_phase = LEAKAGE_FUZZ_MUTATE_SECRET;
       // printf("In LEAKAGE_FUZZ_MUTATE_SECRET phase\n");
+    } else if (afl->stage_cur >= afl->stage_max) {
+      leak_fuzz_phase = LEAKAGE_FUZZ_MUTATE_FULL_INPUT;
     }
 
     u32 temp_public_len = leak_input.mutation_seed_public_len;
     u32 temp_secret_len = leak_input.mutation_seed_secret_len;
-    u32 temp_combined_len = leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT ?
-                            leak_input.mutation_seed_public_len + leak_input.mutation_seed_secret_len :
-                            leak_input.mutation_seed_secret_len;
+
+    u32 temp_combined_len; 
+    if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
+      temp_combined_len = leak_input.mutation_seed_public_len + leak_input.mutation_seed_secret_len;
+    } else if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_PUBLIC) {
+      temp_combined_len = leak_input.mutation_seed_public_len;
+    } else {
+      temp_combined_len = leak_input.mutation_seed_secret_len;
+    }
 
     if (temp_combined_len == 0) {
-      printf("Skipping current input (full_input? %u) as temp_combined_len is 0\n",
-             leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT);
+      printf("Skipping current input (public? %u) as temp_combined_len is 0\n",
+             leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_PUBLIC);
       break;
     }
 
@@ -7272,6 +7281,10 @@ havoc_stage:
       memcpy(mutate_buf,
              leak_input.mutation_seed_combined_buf,
              leak_input.mutation_seed_public_len + leak_input.mutation_seed_secret_len);
+    } else if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_PUBLIC) {
+      memcpy(mutate_buf,
+             leak_input.mutation_seed_combined_buf,
+             leak_input.mutation_seed_public_len);
     } else {
       memcpy(mutate_buf,
              leak_input.mutation_seed_combined_buf + leak_input.mutation_seed_public_len,
@@ -7663,6 +7676,8 @@ havoc_stage:
               } else {
                 temp_secret_len += clone_len;
               }
+           } else if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_PUBLIC) {
+             temp_public_len += clone_len;
             }  else {
               temp_secret_len += clone_len;
             }
@@ -7717,7 +7732,9 @@ havoc_stage:
               } else {
                 temp_secret_len += clone_len;
               }
-            }  else {
+           } else if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_PUBLIC) {
+             temp_public_len += clone_len;
+            } else {
               temp_secret_len += clone_len;
             }
 
@@ -7810,7 +7827,9 @@ havoc_stage:
             } else {
               temp_secret_len -= del_len;
             }
-          } else {
+          } else if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_PUBLIC) {
+           temp_public_len -= del_len;
+         } else {
             temp_secret_len -= del_len;
           }
 
@@ -7829,6 +7848,8 @@ havoc_stage:
            u32 buf_len;
            if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
               buf_len = temp_combined_len;
+           } else if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_PUBLIC) {
+             buf_len = temp_public_len;
            } else {
              buf_len = temp_secret_len;
            }
@@ -7889,6 +7910,8 @@ havoc_stage:
                 } else {
                   temp_secret_len += extra_len;
                 }
+             } else if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_PUBLIC) {
+               temp_public_len += extra_len;
               } else {
                 temp_secret_len += extra_len;
               }
@@ -7962,7 +7985,9 @@ havoc_stage:
                 } else {
                   temp_secret_len += extra_len;
                 }
-              } else {
+              } else if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_PUBLIC) {
+               temp_public_len += extra_len;
+             } else {
                 temp_secret_len += extra_len;
               }
 
@@ -8033,6 +8058,26 @@ havoc_stage:
 #endif
               memmove(mutate_buf + copy_to, new_combined_buf + copy_from, copy_len);
 
+           } else if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_PUBLIC) {
+
+             if (new_public_len > 0) {
+                copy_len = choose_block_len(afl, new_public_len - 1);
+             } else {
+               copy_len = 0;
+             }
+
+              if (copy_len > temp_combined_len) copy_len = temp_combined_len;
+              copy_from = rand_below(afl, new_combined_len - copy_len + 1);
+              copy_to = rand_below(afl, temp_combined_len - copy_len + 1);
+
+#ifdef INTROSPECTION
+              snprintf(afl->m_tmp, sizeof(afl->m_tmp),
+                       " SPLICE_OVERWRITE-%u-%u-%u-%s", copy_from, copy_to,
+                       copy_len, target->fname);
+              strcat(afl->mutation, afl->m_tmp);
+#endif
+              memmove(mutate_buf + copy_to, new_combined_buf + copy_from, copy_len);
+
             } else {
 
               if (new_secret_len > 0) {
@@ -8064,6 +8109,11 @@ havoc_stage:
             if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_FULL_INPUT) {
               clone_len = choose_block_len(afl, new_combined_len);
               clone_from = rand_below(afl, new_combined_len - clone_len + 1);
+
+           } else if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_PUBLIC) {
+              clone_len = choose_block_len(afl, new_public_len);
+              clone_from = rand_below(afl, new_public_len - clone_len + 1);
+
             } else {
               clone_len = choose_block_len(afl, new_secret_len);
               clone_from = rand_below(afl, new_secret_len - clone_len + 1);
@@ -8101,6 +8151,8 @@ havoc_stage:
               } else {
                 temp_secret_len += clone_len;
               }
+           } else if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_PUBLIC) {
+             temp_public_len += clone_len;
             } else {
               temp_secret_len += clone_len;
             }
@@ -8127,6 +8179,12 @@ havoc_stage:
                                temp_public_len,
                                mutate_buf + temp_public_len,
                                temp_secret_len);
+    } else if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_PUBLIC) {
+      res = leakage_fuzz_stuff(afl,
+                               mutate_buf,
+                               temp_public_len,
+                               leak_input.mutation_seed_combined_buf + leak_input.mutation_seed_public_len,
+                               leak_input.mutation_seed_secret_len);
     } else {
       res = leakage_fuzz_stuff(afl,
                                leak_input.mutation_seed_combined_buf,
@@ -8371,6 +8429,11 @@ retry_splicing:
                    combined_buf,
                    MIN(len, (s64)combined_len),
                    &f_diff, &l_diff);
+    } else if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_PUBLIC) {
+      locate_diffs(leak_input.mutation_seed_combined_buf,
+                   combined_buf,
+                   MIN(leak_input.mutation_seed_public_len, (s64)public_len),
+                   &f_diff, &l_diff);
     } else {
       locate_diffs(leak_input.mutation_seed_combined_buf + leak_input.mutation_seed_public_len,
                    combined_buf + public_len,
@@ -8408,6 +8471,21 @@ retry_splicing:
         }
       }
       leak_input.mutation_seed_secret_len = len - leak_input.mutation_seed_public_len;
+
+      u8 *tmp = raw_combined_scratch_buf;
+      raw_combined_scratch_buf = leak_input.mutation_seed_combined_buf;
+      leak_input.mutation_seed_combined_buf = tmp;
+
+    } else if (leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_PUBLIC) {
+
+      len = combined_len;
+      raw_combined_scratch_buf = ck_realloc(raw_combined_scratch_buf,
+                                            public_len + leak_input.mutation_seed_secret_len);
+      memcpy(raw_combined_scratch_buf, leak_input.mutation_seed_combined_buf, split_at);
+      memcpy(raw_combined_scratch_buf + split_at,
+             combined_buf + split_at,
+             leak_input.mutation_seed_public_len - split_at);
+      leak_input.mutation_seed_public_len = public_len;
 
       u8 *tmp = raw_combined_scratch_buf;
       raw_combined_scratch_buf = leak_input.mutation_seed_combined_buf;
