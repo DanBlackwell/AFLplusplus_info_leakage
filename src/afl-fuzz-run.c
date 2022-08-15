@@ -1023,6 +1023,8 @@ leakage_fuzz_stuff(afl_state_t *afl, u8 *public_in_buf, u32 public_len, u8 *secr
       fault
   );
 
+  free(combined_buf);
+
   if (!(afl->stage_cur % afl->stats_update_freq) ||
       afl->stage_cur + 1 == afl->stage_max) {
 

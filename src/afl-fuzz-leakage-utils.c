@@ -246,7 +246,7 @@ static inline void leakage_queue_testcase_store_mem(afl_state_t *afl, struct que
 
 }
 
-u8 check_for_instability(afl_state_t *afl, const u8 *expected_out_buf, const u32 expected_out_len) {
+u8 check_for_instability(afl_state_t *afl, const u8 *in_buf, u32 in_len, const u8 *expected_out_buf, const u32 expected_out_len) {
   static u8 *expected_out_buf_copy = NULL;
   static u32 expected_out_len_copy = 0;
 
@@ -257,6 +257,7 @@ u8 check_for_instability(afl_state_t *afl, const u8 *expected_out_buf, const u32
   memcpy(expected_out_buf_copy, expected_out_buf, expected_out_len);
 
   for (int i = 0; i < 100; i++) {
+    write_to_testcase(afl, (void *)in_buf, in_len);
     u8 fault = fuzz_run_target(afl, &afl->fsrv, afl->fsrv.exec_tmout);
     if (fault) {
       printf("Discarding potential leaky input as it gave a fault\n");
@@ -266,6 +267,18 @@ u8 check_for_instability(afl_state_t *afl, const u8 *expected_out_buf, const u32
     if (afl->fsrv.stdout_raw_buffer_len != expected_out_len ||
         memcmp(afl->fsrv.stdout_raw_buffer, expected_out_buf_copy, expected_out_len)) {
       printf("Discarding potential leaky input as it did not produce a consistent output\n");
+
+      printf("First run output (%d bytes): [", expected_out_len);
+      for (u32 i = 0; i < expected_out_len; i++)
+        printf("%hhu, ", expected_out_buf_copy[i]);
+      printf("\b\b]\n");
+
+      printf("Repeat %d run output (%d bytes): [", i, afl->fsrv.stdout_raw_buffer_len);
+      for (u32 i = 0; i < afl->fsrv.stdout_raw_buffer_len; i++)
+        printf("%hhu, ", afl->fsrv.stdout_raw_buffer[i]);
+      printf("\b\b]\n");
+
+
       return 1;
     }
   }
@@ -349,7 +362,8 @@ leakage_save_if_interesting(afl_state_t *afl,
 //           sought.public_input_hash, sought.secret_input_hash, sought.output_hash);
 
   } else {
-    u8 unstable = check_for_instability(afl, afl->fsrv.stdout_raw_buffer,
+    u8 unstable = check_for_instability(afl, combined_buf, combined_len,
+                                        afl->fsrv.stdout_raw_buffer,
                                         afl->fsrv.stdout_raw_buffer_len);
 
     if (unstable) goto skip_leak_check;
