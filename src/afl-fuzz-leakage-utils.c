@@ -336,51 +336,57 @@ leakage_save_if_interesting(afl_state_t *afl,
 
     u64 secret_input_hash = hash64(secret_input_buf, secret_len, HASH_CONST);
     sought.secret_input_hash = secret_input_hash;
-    sought.output_hash = output_hash;
+    sought.output_hashes[0] = output_hash;
 
-    {
-      u32   len = afl->fsrv.stdout_raw_buffer_len;
-      char *tmp = malloc(len * 2);
-      u32   tmp_len = 0;
-      for (u32 i = 0; i < len; i++, tmp_len++) {
-        if (afl->fsrv.stdout_raw_buffer[i] == '\n') {
-          tmp[tmp_len++] = '\\';
-          tmp[tmp_len] = 'n';
-        } else {
-          tmp[tmp_len] = afl->fsrv.stdout_raw_buffer[i];
-        }
-      }
-
+//    {
+//      u32   len = afl->fsrv.stdout_raw_buffer_len;
+//      char *tmp = malloc(len * 2);
+//      u32   tmp_len = 0;
+//      for (u32 i = 0; i < len; i++, tmp_len++) {
+//        if (afl->fsrv.stdout_raw_buffer[i] == '\n') {
+//          tmp[tmp_len++] = '\\';
+//          tmp[tmp_len] = 'n';
+//        } else {
+//          tmp[tmp_len] = afl->fsrv.stdout_raw_buffer[i];
+//        }
+//      }
+//
 //      printf("Adding to io_map: { L: %.*s, H: %.*s, O: \"%.*s\" }\n",
 //             public_len, public_input_buf, secret_len, secret_input_buf,
 //             tmp_len, tmp);
-      free(tmp);
-    }
+//      free(tmp);
+//    }
 
     hashmap_set(afl->public_input_to_output_map, &sought);
 //    printf("Added to io_map { L: %llu, H: %llu, OUT: %llu }\n",
 //           sought.public_input_hash, sought.secret_input_hash, sought.output_hash);
 
   } else {
-    u8 unstable = check_for_instability(afl, combined_buf, combined_len,
-                                        afl->fsrv.stdout_raw_buffer,
-                                        afl->fsrv.stdout_raw_buffer_len);
 
-    if (unstable) goto skip_leak_check;
+    if (output_hash == found->output_hashes[0]) {
+      goto skip_leak_check;
+    }
 
     for (int i = 0; i < found->secret_input_bufs_filled; i++) {
       if (secret_len == found->secret_input_buf_len[i] &&
           !memcmp(secret_input_buf, found->secret_input_bufs[i], secret_len))
       {
-        printf("We already have this secret input buf in our list - discard it\n");
+        //printf("We already have this secret input buf in our list - discard it\n");
+        goto skip_leak_check;
+      } else if (output_hash == found->output_hashes[i]) {
         goto skip_leak_check;
       }
     }
 
-    if (found->secret_input_bufs_filled < SECRET_BUFS_COUNT) {
+    if (found->secret_input_bufs_filled >= SECRET_BUFS_COUNT) {
       goto skip_leak_check;
     }
 
+    u8 unstable = check_for_instability(afl, combined_buf, combined_len,
+                                        afl->fsrv.stdout_raw_buffer,
+                                        afl->fsrv.stdout_raw_buffer_len);
+
+    if (unstable) goto skip_leak_check;
 
     if (!found->public_input_buf) {
       // Store a copy of the public input
@@ -394,6 +400,7 @@ leakage_save_if_interesting(afl_state_t *afl,
     found->secret_input_buf_len[pos] = secret_len;
     found->secret_input_bufs[pos] = ck_alloc(secret_len);
     memcpy(found->secret_input_bufs[pos], secret_input_buf, secret_len);
+    found->output_hashes[pos] = output_hash;
     found->secret_input_bufs_filled++;
 
     if (found->secret_input_bufs_filled <= 1) {

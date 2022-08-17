@@ -39,7 +39,7 @@ u8 leakage_save_if_interesting(afl_state_t *afl,
 struct input_output_hashes {
   u64 public_input_hash;
   u64 secret_input_hash;
-  u64 output_hash;
+  u64 output_hashes[SECRET_BUFS_COUNT];
 
   u8 *public_input_buf;
   u32 public_input_buf_len;
