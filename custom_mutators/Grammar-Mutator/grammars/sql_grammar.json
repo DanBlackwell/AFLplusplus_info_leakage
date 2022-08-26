@@ -1,0 +1,102 @@
+{
+  "<START>": [["<updatestmt>"], ["<insertstmt>"], ["<deletestmt>"]],
+
+  "<colid>": [["a"], ["b"], ["c"], ["secret1"], ["secret2"], ["aaa"], ["aaaa"]], 
+  "<table_ref>": [["errtest"], ["errtest_part_1"], ["errtest_part_2"]],
+  
+  "<updatestmt>": [["<opt_with_clause>", " UPDATE ", "<relation_expr_opt_alias>", " SET ", "<set_clause_list>", "<from_clause>", "<where_or_current_clause>", "<returning_clause>"]],
+  "<insertstmt>": [["<opt_with_clause>", " INSERT INTO ", "<insert_target>", "<insert_rest>", "<opt_on_conflict>", "<returning_clause>"]],
+  "<deletestmt>": [["<opt_with_clause>", " DELETE FROM ", "<relation_expr_opt_alias>", " USING ", "<from_list>", "<where_or_current_clause>", "<returning_clause>"]],
+
+  "<insert_target>": [["<qualified_name>", " "], ["<qualified_name>", " AS ", "<colid>", " "]],
+  "<insert_rest>": [["<selectstmt>"]],
+  
+  "<selectstmt>": [[" SELECT ", "<colid>", " FROM ", "<table_ref>"]],
+  
+  "<select_with_parens>": [["(", "<select_no_parens>", ")"], ["(", "<select_with_parens>", ")"]],
+  "<select_no_parens>": [["<select_clause>"]],
+  "<select_clause>": [["<simple_select>"], ["<select_with_parens>"]],
+  "<simple_select>": [[" SELECT ", "<from_clause>", "<where_clause>"], 
+	              ["<values_clause>"],
+		      [" TABLE ", "<relation_expr>"]],
+  "<where_clause>": [[" WHERE ", "a_expr"]],
+  "<values_clause>": [[" VALUES (", "<expr_list>", ")"], [" VALUES (", "<expr_list>", ")", "<values_clause>"]],
+
+  "<opt_on_conflict>": [[" "]],
+  "<returning_clause>": [[" RETURNING ", "<target_list>"]],
+  "<target_list>": [["<target_el>"], ["<target_el>", ", ", "<target_list>"]],
+  "<target_el>": [["<a_expr>"], ["*"]],
+  
+  "<opt_with_clause>": [[" "]],
+  
+  "<relation_expr_opt_alias>": [["<relation_expr>"], ["<relation_expr>", " AS ", "<colid>"]],
+  "<relation_expr>": [["<qualified_name>"], ["<qualified_name>", "*"]],
+  "<qualified_name>": [["<colid>"], ["<colid>", "<indirection>"]],
+  "<indirection>": [["<indirection_el>"], ["<indirection>", "<indirection_el>"]],
+  "<indirection_el>": [[".", "<attr_name>"], [".*"]],
+
+  "<attr_name>": [["<colid>"]],
+  
+  "<set_clause_list>": [["<set_clause>"], ["<set_clause>", ", ", "<set_clause_list>"]],
+  "<set_clause>": [["<set_target>", " = ", "<a_expr>"], ["(", "<set_target_list>", ") = ", "<a_expr>"]],
+  
+  "<set_target>": [["<colid>"], ["<colid>", "<indirection>"]],
+  "<set_target_list>": [["<set_target>"], ["<set_target>", ", ", "<set_target_list>"]],
+  
+  "<from_clause>": [[" FROM ", "<from_list>"]],
+  "<from_list>": [["<table_ref>"], ["<table_ref>", ", ", "<from_list>"]],
+  
+  "<where_or_current_clause>": [[" WHERE ", "<a_expr>"]],
+  
+  "<a_expr>": [["<a_expr_lessless>"], ["<a_expr_lessless>", "<qual_op>"]],
+  "<a_expr_lessless>": [["<a_expr_or>"], 
+                        ["<a_expr_or>", " << ", "<a_expr_lessless>"], 
+                        ["<a_expr_or>", " >> ", "<a_expr_lessless>"]],
+  "<a_expr_or>": [["<a_expr_and>"], ["<a_expr_and>", " OR ", "<a_expr_or>"]],
+  "<a_expr_and>": [["<a_expr_in>"], ["<a_expr_in>", " AND ", "<a_expr_and>"]],
+  "<a_expr_in>": [["<a_expr_unary_not>"], 
+                  ["<a_expr_unary_not>", " IN ", "<in_expr>"],
+                  ["<a_expr_unary_not>", " NOT IN ", "<in_expr>"]], 
+
+  "<in_expr>": [["(", "<expr_list>", ")"]],
+  "<expr_list>": [["<a_expr>"], ["<a_expr>", ", ", "<expr_list>"]],
+  
+  "<a_expr_unary_not>": [[" NOT ", "<a_expr_isnull>"], ["<a_expr_isnull>"]],
+
+  "<a_expr_isnull>": [["<a_expr_is_not>"], ["<a_expr_is_not>", " ISNULL "], ["<a_expr_is_not>", " NOTNULL "]],
+  
+  "<a_expr_is_not>": [["<a_expr_compare>"], ["<a_expr_compare>", " IS ", "<is_not_options>"], ["<a_expr_compare>", " IS NOT ", "<is_not_options>"]],
+  "<is_not_options>":  [["NULL "], ["TRUE "], ["FALSE "], ["UNKNOWN "], ["DISTINCT FROM ", "<a_expr>", " "], ["DOCUMENT "], ["NORMALIZED "]],
+
+  "<a_expr_compare>": [["<a_expr_like>", " ", "<compare_opts>", " ", "<a_expr_like>"], ["(", "<a_expr>", ")"]],
+  "<compare_opts>": [["<"], [">"], ["="], ["<="], [">="], ["!="]],
+
+  "<a_expr_like>": [["<a_expr_qual_op>"], ["<a_expr_qual_op>", " NOT ", "<like_opt>", "<a_expr_qual_op>", " ", "<opt_escape>"]],
+  "<like_opt>": [["LIKE "], ["ILIKE "], ["SIMILAR TO "], ["BETWEEN SYMMETRIC "]],
+  "<opt_escape>": [["ESCAPE ", "<a_expr>"], [" "]], 
+
+  "<a_expr_qual_op>": [["<a_expr_unary_qualop>"], ["<a_expr_unary_qualop>", "<qual_op>", "<a_expr_unary_qualop>"]],
+  "<a_expr_unary_qualop>": [["<a_expr_add>"], ["<qual_op>", "<a_expr_add>"]],
+
+  "<a_expr_add>": [["<a_expr_mul>"], ["<a_expr_mul>", " - ", "<a_expr_add>"], ["<a_expr_mul>", " + ", "<a_expr_add>"]],
+  "<a_expr_mul>": [["<a_expr_caret>"], 
+                   ["<a_expr_caret>", "*", "<a_expr_mul>"],
+                   ["<a_expr_caret>", "/", "<a_expr_mul>"],
+                   ["<a_expr_caret>", "%", "<a_expr_mul>"]],
+
+  "<a_expr_caret>": [["<a_expr_unary_sign>"], ["<a_expr_unary_sign>", " ^ ", "<a_expr>"]],
+  "<a_expr_unary_sign>": [["<a_expr_at_time_zone>"], 
+                          ["-", "<a_expr_at_time_zone>"], 
+                          ["+", "<a_expr_at_time_zone>"]],
+
+  "<a_expr_at_time_zone>": [["<a_expr_collate>"],
+                           ["<a_expr_collate>", " AT TIME ZONE ", "<a_expr>"]],
+
+  "<a_expr_collate>": [["<colid>"]],
+
+  "<qual_op>": [["<operator>"], ["<operator>", "(", "<any_operator>", ")"]],
+  "<any_operator>": [["<colid>", ".", "<any_operator>"], ["<operator>"]],
+
+  "<operator>": [["<op_char>"], ["+"], ["-"], ["/"], ["*"]],
+  "<op_char>": [["*"], ["<"], [">"], ["="], ["~"], ["@"], ["%"], ["^"], ["&"], ["|"], ["`"], ["?"], ["#"]]
+}
