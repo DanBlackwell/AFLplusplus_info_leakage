@@ -7008,152 +7008,177 @@ custom_mutator_stage:
 
   if (likely(!afl->custom_mutators_count)) { goto havoc_stage; }
 
-  if (afl->fsrv.leakage_hunting) {
-    FATAL("Custom mutators not implemented for leakage");
-  }
-//
-//  afl->stage_name = "custom mutator";
-//  afl->stage_short = "custom";
-//  afl->stage_max = HAVOC_CYCLES * perf_score / afl->havoc_div / 100;
-//  afl->stage_val_type = STAGE_VAL_NONE;
-//  bool has_custom_fuzz = false;
-//
-//  if (afl->stage_max < HAVOC_MIN) { afl->stage_max = HAVOC_MIN; }
-//
-//  const u32 max_seed_size = MAX_FILE, saved_max = afl->stage_max;
-//
-//  orig_hit_cnt = afl->queued_paths + afl->unique_crashes;
-//
-//#ifdef INTROSPECTION
-//  afl->mutation[0] = 0;
-//#endif
-//
-//  LIST_FOREACH(&afl->custom_mutator_list, struct custom_mutator, {
-//
-//    if (el->afl_custom_fuzz) {
-//
-//      afl->current_custom_fuzz = el;
-//
-//      if (el->afl_custom_fuzz_count) {
-//
-//        afl->stage_max = el->afl_custom_fuzz_count(el->data, out_buf, len);
-//
-//      } else {
-//
-//        afl->stage_max = saved_max;
-//
-//      }
-//
-//      has_custom_fuzz = true;
-//
-//      afl->stage_short = el->name_short;
-//
-//      if (afl->stage_max) {
-//
-//        for (afl->stage_cur = 0; afl->stage_cur < afl->stage_max;
-//             ++afl->stage_cur) {
-//
-//          struct queue_entry *target = NULL;
-//          u32                 tid;
-//          u8 *                new_buf = NULL;
-//          u32                 target_len = 0;
-//
-//          /* check if splicing makes sense yet (enough entries) */
-//          if (likely(afl->ready_for_splicing_count > 1)) {
-//
-//            /* Pick a random other queue entry for passing to external API
-//               that has the necessary length */
-//
-//            do {
-//
-//              tid = rand_below(afl, afl->queued_paths);
-//
-//            } while (unlikely(tid == afl->current_entry ||
-//
-//                              afl->queue_buf[tid]->len < 4));
-//
-//            target = afl->queue_buf[tid];
-//            afl->splicing_with = tid;
-//
-//            /* Read the additional testcase into a new buffer. */
-//            new_buf = queue_testcase_get(afl, target);
-//            target_len = target->len;
-//
-//          }
-//
-//          u8 *mutated_buf = NULL;
-//
-//          size_t mutated_size =
-//              el->afl_custom_fuzz(el->data, out_buf, len, &mutated_buf, new_buf,
-//                                  target_len, max_seed_size);
-//
-//          if (unlikely(!mutated_buf)) {
-//
-//            FATAL("Error in custom_fuzz. Size returned: %zu", mutated_size);
-//
-//          }
-//
-//          if (mutated_size > 0) {
-//
-//            if (common_fuzz_stuff(afl, mutated_buf, (u32)mutated_size)) {
-//
-//              goto abandon_entry;
-//
-//            }
-//
-//            if (!el->afl_custom_fuzz_count) {
-//
-//              /* If we're finding new stuff, let's run for a bit longer, limits
-//                permitting. */
-//
-//              if (afl->queued_paths != havoc_queued) {
-//
-//                if (perf_score <= afl->havoc_max_mult * 100) {
-//
-//                  afl->stage_max *= 2;
-//                  perf_score *= 2;
-//
-//                }
-//
-//                havoc_queued = afl->queued_paths;
-//
-//              }
-//
-//            }
-//
-//          }
-//
-//          /* `(afl->)out_buf` may have been changed by the call to custom_fuzz
-//           */
-//          /* TODO: Only do this when `mutated_buf` == `out_buf`? Branch vs
-//           * Memcpy.
-//           */
-//          memcpy(out_buf, in_buf, len);
-//
-//        }
-//
-//      }
-//
-//    }
-//
-//  });
-//
-//  afl->current_custom_fuzz = NULL;
-//
-//  if (!has_custom_fuzz) goto havoc_stage;
-//
-//  new_hit_cnt = afl->queued_paths + afl->unique_crashes;
-//
-//  afl->stage_finds[STAGE_CUSTOM_MUTATOR] += new_hit_cnt - orig_hit_cnt;
-//  afl->stage_cycles[STAGE_CUSTOM_MUTATOR] += afl->stage_max;
-//
-//  if (likely(afl->custom_only)) {
-//
-//    /* Skip other stages */
-//    ret_val = 0;
-//    goto abandon_entry;
-//
+//  if (afl->fsrv.leakage_hunting) {
+//    FATAL("Custom mutators not implemented for leakage");
 //  }
+  afl->stage_name = "custom mutator";
+  afl->stage_short = "custom";
+  afl->stage_max = HAVOC_CYCLES * perf_score / afl->havoc_div / 100;
+  afl->stage_val_type = STAGE_VAL_NONE;
+  bool has_custom_fuzz = false;
+
+  if (afl->stage_max < HAVOC_MIN) { afl->stage_max = HAVOC_MIN; }
+
+  const u32 max_seed_size = MAX_FILE, saved_max = afl->stage_max;
+
+  orig_hit_cnt = afl->queued_paths + afl->unique_crashes;
+
+  u32 cur_len = leak_input.mutation_seed_public_len;
+  mutate_buf = ck_realloc(mutate_buf, cur_len);
+  memcpy(mutate_buf, leak_input.mutation_seed_combined_buf, cur_len);
+
+#ifdef INTROSPECTION
+  afl->mutation[0] = 0;
+#endif
+
+  LIST_FOREACH(&afl->custom_mutator_list, struct custom_mutator, {
+
+    if (el->afl_custom_fuzz) {
+
+      afl->current_custom_fuzz = el;
+
+      if (el->afl_custom_fuzz_count) {
+
+        afl->stage_max = el->afl_custom_fuzz_count(el->data, mutate_buf, cur_len);
+
+      } else {
+
+        afl->stage_max = saved_max;
+
+      }
+
+      has_custom_fuzz = true;
+
+      afl->stage_short = el->name_short;
+
+      if (afl->stage_max) {
+
+        for (afl->stage_cur = 0; afl->stage_cur < afl->stage_max;
+             ++afl->stage_cur) {
+
+          struct queue_entry *target = NULL;
+          u32                 tid;
+          u8 *                new_buf = NULL;
+          u32                 target_len = 0;
+
+          /* check if splicing makes sense yet (enough entries) */
+          if (likely(afl->ready_for_splicing_count > 1)) {
+
+            /* Pick a random other queue entry for passing to external API
+               that has the necessary length */
+
+            do {
+
+              tid = rand_below(afl, afl->queued_paths);
+
+            } while (unlikely(tid == afl->current_entry ||
+
+                              afl->queue_buf[tid]->len < 4));
+
+            target = afl->queue_buf[tid];
+            afl->splicing_with = tid;
+
+            /* Read the additional testcase into a new buffer. */
+            new_buf = queue_testcase_get(afl, target);
+
+            u8 *new_public_buf; u8 *new_secret_buf;
+            u32 new_public_len; u32 new_secret_len;
+            find_public_and_secret_inputs(new_buf, target->len,
+                                          &new_public_buf, &new_public_len,
+                                          &new_secret_buf, &new_secret_len);
+            u32 new_combined_len = new_public_len + new_secret_len;
+            u8 *new_combined_buf = ck_alloc(new_combined_len);
+
+            memcpy(new_combined_buf, new_public_buf, new_public_len);
+            memcpy(new_combined_buf + new_public_len, new_secret_buf, new_secret_len);
+
+            ck_free(new_public_buf);
+            ck_free(new_secret_buf);
+
+            new_buf = new_combined_buf;
+
+            target_len = target->len;
+
+          }
+
+          u8 *mutated_buf = NULL;
+
+          size_t mutated_size =
+              el->afl_custom_fuzz(el->data, mutate_buf, cur_len, &mutated_buf, new_buf,
+                                  target_len, max_seed_size);
+
+          if (unlikely(!mutated_buf)) {
+
+            FATAL("Error in custom_fuzz. Size returned: %zu", mutated_size);
+
+          }
+
+          if (mutated_size > 0) {
+
+            if (leakage_fuzz_stuff(afl,
+                                   mutated_buf,
+                                   (u32)mutated_size,
+                                   leak_input.mutation_seed_combined_buf + leak_input.mutation_seed_public_len,
+                                   leak_input.mutation_seed_secret_len)) {
+
+              goto abandon_entry;
+
+            }
+
+            if (!el->afl_custom_fuzz_count) {
+
+              /* If we're finding new stuff, let's run for a bit longer, limits
+                permitting. */
+
+              if (afl->queued_paths != havoc_queued) {
+
+                if (perf_score <= afl->havoc_max_mult * 100) {
+
+                  afl->stage_max *= 2;
+                  perf_score *= 2;
+
+                }
+
+                havoc_queued = afl->queued_paths;
+
+              }
+
+            }
+
+          }
+
+          /* `(afl->)out_buf` may have been changed by the call to custom_fuzz
+           */
+          /* TODO: Only do this when `mutated_buf` == `out_buf`? Branch vs
+           * Memcpy.
+           */
+          memcpy(mutate_buf, leak_input.mutation_seed_combined_buf, cur_len);
+
+        }
+
+      }
+
+    }
+
+  });
+
+  afl->current_custom_fuzz = NULL;
+
+  if (!has_custom_fuzz) goto havoc_stage;
+
+  new_hit_cnt = afl->queued_paths + afl->unique_crashes;
+
+  afl->stage_finds[STAGE_CUSTOM_MUTATOR] += new_hit_cnt - orig_hit_cnt;
+  afl->stage_cycles[STAGE_CUSTOM_MUTATOR] += afl->stage_max;
+
+  if (likely(afl->custom_only)) {
+
+    /* Skip other stages */
+    ret_val = 0;
+    goto abandon_entry;
+
+  }
+
 
   /****************
    * RANDOM HAVOC *
@@ -7303,42 +7328,39 @@ havoc_stage:
 
     for (i = 0; i < use_stacking; ++i) {
 
-      if (afl->custom_mutators_count) {
+      if (afl->custom_mutators_count && leak_fuzz_phase == LEAKAGE_FUZZ_MUTATE_PUBLIC) {
 
-        if (afl->fsrv.leakage_hunting) {
-          FATAL("Custom mutators not implemented for leakage");
-        }
+        LIST_FOREACH(&afl->custom_mutator_list, struct custom_mutator, {
 
-//        LIST_FOREACH(&afl->custom_mutator_list, struct custom_mutator, {
-//
-//          if (el->stacked_custom &&
-//              rand_below(afl, 100) < el->stacked_custom_prob) {
-//
-//            u8 *   custom_havoc_buf = NULL;
-//            size_t new_len = el->afl_custom_havoc_mutation(
-//                el->data, out_buf, temp_len, &custom_havoc_buf, MAX_FILE);
-//            if (unlikely(!custom_havoc_buf)) {
-//
-//              FATAL("Error in custom_havoc (return %zu)", new_len);
-//
-//            }
-//
-//            if (likely(new_len > 0 && custom_havoc_buf)) {
-//
-//              temp_len = new_len;
-//              if (out_buf != custom_havoc_buf) {
-//
-//                out_buf = afl_realloc(AFL_BUF_PARAM(out), temp_len);
-//                if (unlikely(!afl->out_buf)) { PFATAL("alloc"); }
-//                memcpy(out_buf, custom_havoc_buf, temp_len);
-//
-//              }
-//
-//            }
-//
-//          }
-//
-//        });
+          if (el->stacked_custom &&
+              rand_below(afl, 100) < el->stacked_custom_prob) {
+
+            u8 *   custom_havoc_buf = NULL;
+            size_t new_len = el->afl_custom_havoc_mutation(
+                el->data, mutate_buf, temp_combined_len, &custom_havoc_buf, MAX_FILE);
+            if (unlikely(!custom_havoc_buf)) {
+              FATAL("Error in custom_havoc (return %zu)", new_len);
+            }
+
+            if (likely(new_len > 0 && custom_havoc_buf)) {
+
+              temp_len = new_len;
+              if (mutate_buf != custom_havoc_buf) {
+
+                u8* new_buf = ck_realloc(leakage_scratch_buf, temp_len);
+                if (unlikely(!new_buf)) { PFATAL("alloc"); }
+                memcpy(new_buf, custom_havoc_buf, temp_len);
+
+                u8 *tmp = mutate_buf;
+                mutate_buf = new_buf;
+                leakage_scratch_buf = tmp;
+
+               temp_public_len = temp_len;
+               temp_combined_len = temp_len;
+              }
+            }
+          }
+        });
 
       }
 
