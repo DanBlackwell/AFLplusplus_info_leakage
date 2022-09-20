@@ -429,7 +429,11 @@ leakage_save_if_interesting(afl_state_t *afl,
       afl->stored_hypertest_leaks_count++;
 
       char *leak_input = (char *)alloc_printf(
-          "%s/leak_id:%06u,input_1", buf, afl->stored_hypertest_leaks_count);
+         "%s/leak_id:%06u,time:%llu,input_1",
+         buf,
+         afl->stored_hypertest_leaks_count,
+         get_cur_time() + afl->prev_run_time - afl->start_time
+      );
       printf("storing to %s\n", leak_input);
       fd = open(leak_input, O_WRONLY | O_CREAT | O_EXCL, DEFAULT_PERMISSION);
       if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", leak_input); }
@@ -444,8 +448,14 @@ leakage_save_if_interesting(afl_state_t *afl,
       close(fd);
       ck_free(comb_buf);
 
-      leak_input = (char *)alloc_printf("%s/leak_id:%06u,input_2", buf,
-                                        afl->stored_hypertest_leaks_count);
+
+      leak_input = (char *)alloc_printf(
+         "%s/leak_id:%06u,time:%llu,input_2",
+         buf,
+         afl->stored_hypertest_leaks_count,
+         get_cur_time() + afl->prev_run_time - afl->start_time
+      );
+
       printf("storing to %s\n", leak_input);
       fd = open(leak_input, O_WRONLY | O_CREAT | O_EXCL, DEFAULT_PERMISSION);
       if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", leak_input); }
