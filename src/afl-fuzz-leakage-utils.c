@@ -428,11 +428,13 @@ leakage_save_if_interesting(afl_state_t *afl,
 
       afl->stored_hypertest_leaks_count++;
 
+      uint64_t currTime = get_cur_time() + afl->prev_run_time - afl->start_time;
+
       char *leak_input = (char *)alloc_printf(
-         "%s/leak_id:%06u,time:%llu,input_1",
+         "%s/leak_id:%04u,time:%llu,input_1",
          buf,
          afl->stored_hypertest_leaks_count,
-         get_cur_time() + afl->prev_run_time - afl->start_time
+         currTime
       );
       printf("storing to %s\n", leak_input);
       fd = open(leak_input, O_WRONLY | O_CREAT | O_EXCL, DEFAULT_PERMISSION);
@@ -450,10 +452,10 @@ leakage_save_if_interesting(afl_state_t *afl,
 
 
       leak_input = (char *)alloc_printf(
-         "%s/leak_id:%06u,time:%llu,input_2",
+         "%s/leak_id:%04u,time:%llu,input_2",
          buf,
          afl->stored_hypertest_leaks_count,
-         get_cur_time() + afl->prev_run_time - afl->start_time
+         currTime
       );
 
       printf("storing to %s\n", leak_input);
@@ -467,6 +469,11 @@ leakage_save_if_interesting(afl_state_t *afl,
       ck_write(fd, comb_buf, comb_len, leak_input);
       close(fd);
       ck_free(comb_buf);
+
+      if (afl->stored_hypertest_leaks_count >= 9999) {
+        printf("Found 9999 leaking input pairs - stopping to save space!\n");
+        afl->stop_soon = 1;
+      }
     }
   }
 
