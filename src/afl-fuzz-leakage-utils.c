@@ -246,15 +246,10 @@ static inline void leakage_queue_testcase_store_mem(afl_state_t *afl, struct que
 
 }
 
-u8 check_for_instability(afl_state_t *afl, const u8 *in_buf, u32 in_len, const u8 *expected_out_buf, const u32 expected_out_len) {
-  static u8 *expected_out_buf_copy = NULL;
-  static u32 expected_out_len_copy = 0;
-
-  if (expected_out_len > expected_out_len_copy) {
-    expected_out_buf_copy = ck_realloc(expected_out_buf_copy, expected_out_len);
-  }
-  expected_out_len_copy = expected_out_len;
-  memcpy(expected_out_buf_copy, expected_out_buf, expected_out_len);
+u8 check_for_instability(afl_state_t *afl, const u8 *in_buf, u32 in_len) {
+  static u8 *expected_out_buf = NULL;
+  static u32 expected_out_len = 0;
+  bool inited = false;
 
   for (int i = 0; i < 100; i++) {
     write_to_testcase(afl, (void *)in_buf, in_len);
@@ -264,22 +259,26 @@ u8 check_for_instability(afl_state_t *afl, const u8 *in_buf, u32 in_len, const u
       return 1;
     }
 
-    if (afl->fsrv.stdout_raw_buffer_len != expected_out_len ||
-        memcmp(afl->fsrv.stdout_raw_buffer, expected_out_buf_copy, expected_out_len)) {
-      printf("Discarding potential leaky input as it did not produce a consistent output\n");
+    if (!inited) {
+      inited = true;
+      if (afl->fsrv.stdout_raw_buffer_len > expected_out_len) {
+        expected_out_buf = ck_realloc(expected_out_buf, afl->fsrv.stdout_raw_buffer_len);
+      }
+      expected_out_len = afl->fsrv.stdout_raw_buffer_len;
+      memcpy(expected_out_buf, afl->fsrv.stdout_raw_buffer, afl->fsrv.stdout_raw_buffer_len);
 
-      printf("First run output (%d bytes): [", expected_out_len);
-      for (u32 i = 0; i < expected_out_len; i++)
-        printf("%hhu, ", expected_out_buf_copy[i]);
-      printf("\b\b]\n");
+    } else {
+      if (afl->fsrv.stdout_raw_buffer_len != expected_out_len ||
+          memcmp(afl->fsrv.stdout_raw_buffer, expected_out_buf, expected_out_len)) {
+        printf("Discarding potential leaky input as it did not produce a consistent output\n");
 
-      printf("Repeat %d run output (%d bytes): [", i, afl->fsrv.stdout_raw_buffer_len);
-      for (u32 i = 0; i < afl->fsrv.stdout_raw_buffer_len; i++)
-        printf("%hhu, ", afl->fsrv.stdout_raw_buffer[i]);
-      printf("\b\b]\n");
+	printf("Input:\n%.*s\n", in_len, in_buf);
 
+        printf("First run output (%d bytes), ", expected_out_len);
+        printf("Repeat %d run output (%d bytes).\n", i, afl->fsrv.stdout_raw_buffer_len);
 
-      return 1;
+        return 1;
+      }
     }
   }
 
@@ -382,9 +381,7 @@ leakage_save_if_interesting(afl_state_t *afl,
       goto skip_leak_check;
     }
 
-    u8 unstable = check_for_instability(afl, combined_buf, combined_len,
-                                        afl->fsrv.stdout_raw_buffer,
-                                        afl->fsrv.stdout_raw_buffer_len);
+    u8 unstable = check_for_instability(afl, combined_buf, combined_len);
 
     if (unstable) goto skip_leak_check;
 
@@ -431,7 +428,7 @@ leakage_save_if_interesting(afl_state_t *afl,
       uint64_t currTime = get_cur_time() + afl->prev_run_time - afl->start_time;
 
       char *leak_input = (char *)alloc_printf(
-         "%s/leak_id:%04u,time:%llu,input_1",
+         "%s/leak_id:%04u,time:%lu,input_1",
          buf,
          afl->stored_hypertest_leaks_count,
          currTime
@@ -452,7 +449,7 @@ leakage_save_if_interesting(afl_state_t *afl,
 
 
       leak_input = (char *)alloc_printf(
-         "%s/leak_id:%04u,time:%llu,input_2",
+         "%s/leak_id:%04u,time:%lu,input_2",
          buf,
          afl->stored_hypertest_leaks_count,
          currTime
