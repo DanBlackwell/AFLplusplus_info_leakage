@@ -249,7 +249,12 @@ static inline void leakage_queue_testcase_store_mem(afl_state_t *afl, struct que
 u8 check_for_instability(afl_state_t *afl, const u8 *in_buf, u32 in_len) {
   static u8 *expected_out_buf = NULL;
   static u32 expected_out_len = 0;
-  bool inited = false;
+
+  if (afl->fsrv.stdout_raw_buffer_len > expected_out_len) {
+    expected_out_buf = ck_realloc(expected_out_buf, afl->fsrv.stdout_raw_buffer_len);
+  }
+  expected_out_len = afl->fsrv.stdout_raw_buffer_len;
+  memcpy(expected_out_buf, afl->fsrv.stdout_raw_buffer, afl->fsrv.stdout_raw_buffer_len);
 
   for (int i = 0; i < 100; i++) {
     write_to_testcase(afl, (void *)in_buf, in_len);
@@ -259,26 +264,22 @@ u8 check_for_instability(afl_state_t *afl, const u8 *in_buf, u32 in_len) {
       return 1;
     }
 
-    if (!inited) {
-      inited = true;
-      if (afl->fsrv.stdout_raw_buffer_len > expected_out_len) {
-        expected_out_buf = ck_realloc(expected_out_buf, afl->fsrv.stdout_raw_buffer_len);
-      }
-      expected_out_len = afl->fsrv.stdout_raw_buffer_len;
-      memcpy(expected_out_buf, afl->fsrv.stdout_raw_buffer, afl->fsrv.stdout_raw_buffer_len);
+    if (afl->fsrv.stdout_raw_buffer_len != expected_out_len ||
+        memcmp(afl->fsrv.stdout_raw_buffer, expected_out_buf, expected_out_len)) {
 
-    } else {
-      if (afl->fsrv.stdout_raw_buffer_len != expected_out_len ||
-          memcmp(afl->fsrv.stdout_raw_buffer, expected_out_buf, expected_out_len)) {
-        printf("Discarding potential leaky input as it did not produce a consistent output\n");
-
-	printf("Input:\n%.*s\n", in_len, in_buf);
-
-        printf("First run output (%d bytes), ", expected_out_len);
-        printf("Repeat %d run output (%d bytes).\n", i, afl->fsrv.stdout_raw_buffer_len);
-
+      if (!expected_out_len) {
+        // silently return 1, as empty output seems to be a forkserver issue
         return 1;
       }
+
+      printf("Discarding potential leaky input as it did not produce a consistent output\n");
+
+      printf("Input:\n%.*s\n", in_len, in_buf);
+
+      printf("First run output (%d bytes), ", expected_out_len);
+      printf("Repeat %d run output (%d bytes).\n", i, afl->fsrv.stdout_raw_buffer_len);
+
+      return 1;
     }
   }
 
@@ -362,7 +363,8 @@ leakage_save_if_interesting(afl_state_t *afl,
 
   } else {
 
-    if (output_hash == found->output_hashes[0]) {
+    if (!found->secret_input_bufs_filled && 
+        output_hash == found->output_hashes[0]) {
       goto skip_leak_check;
     }
 
@@ -399,6 +401,11 @@ leakage_save_if_interesting(afl_state_t *afl,
     memcpy(found->secret_input_bufs[pos], secret_input_buf, secret_len);
     found->output_hashes[pos] = output_hash;
     found->secret_input_bufs_filled++;
+
+    // Store a copy of the output
+    found->public_output_buf_len[pos] = afl->fsrv.stdout_raw_buffer_len;
+    found->public_output_bufs[pos] = ck_alloc(afl->fsrv.stdout_raw_buffer_len);
+    memcpy(found->public_output_bufs[pos], afl->fsrv.stdout_raw_buffer, afl->fsrv.stdout_raw_buffer_len);
 
     if (found->secret_input_bufs_filled <= 1) {
       afl->detected_leaks_count++;
@@ -437,6 +444,15 @@ leakage_save_if_interesting(afl_state_t *afl,
       fd = open(leak_input, O_WRONLY | O_CREAT | O_EXCL, DEFAULT_PERMISSION);
       if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", leak_input); }
 
+      char *leak_full = (char *)alloc_printf(
+         "%s/leak_id:%04u,time:%lu,full",
+         buf,
+         afl->stored_hypertest_leaks_count,
+         currTime
+      );
+      int full_fd = open(leak_full, O_WRONLY | O_CREAT | O_EXCL, DEFAULT_PERMISSION);
+      if (unlikely(fd < 0)) { PFATAL("Unable to create '%s'", leak_full); }
+
       char *comb_buf;
       u32   comb_len;
       create_buffer_from_public_and_secret_inputs(
@@ -444,9 +460,17 @@ leakage_save_if_interesting(afl_state_t *afl,
           found->secret_input_bufs[0], found->secret_input_buf_len[0],
           &comb_buf, &comb_len);
       ck_write(fd, comb_buf, comb_len, leak_input);
+      ck_write(full_fd, comb_buf, comb_len, leak_full);
       close(fd);
       ck_free(comb_buf);
 
+      char newlines[2] = { '\n', '\n' };
+      ck_write(full_fd, newlines, 2, leak_full);
+      ck_write(full_fd, found->public_output_bufs[0], found->public_output_buf_len[0], leak_full);
+      char hashStr[80];
+      snprintf(hashStr, 80, "\n%llu", found->output_hashes[0]);
+      ck_write(full_fd, hashStr, strlen(hashStr), leak_full);
+      ck_write(full_fd, newlines, 2, leak_full);
 
       leak_input = (char *)alloc_printf(
          "%s/leak_id:%04u,time:%lu,input_2",
@@ -464,8 +488,15 @@ leakage_save_if_interesting(afl_state_t *afl,
           found->secret_input_bufs[1], found->secret_input_buf_len[1],
           &comb_buf, &comb_len);
       ck_write(fd, comb_buf, comb_len, leak_input);
+      ck_write(full_fd, comb_buf, comb_len, leak_full);
       close(fd);
       ck_free(comb_buf);
+
+      ck_write(full_fd, newlines, 2, leak_full);
+      ck_write(full_fd, found->public_output_bufs[1], found->public_output_buf_len[1], leak_full);
+      snprintf(hashStr, 80, "\n%llu", found->output_hashes[1]);
+      ck_write(full_fd, hashStr, strlen(hashStr), leak_full);
+      close(full_fd);
 
       if (afl->stored_hypertest_leaks_count >= 9999) {
         printf("Found 9999 leaking input pairs - stopping to save space!\n");
