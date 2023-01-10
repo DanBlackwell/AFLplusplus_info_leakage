@@ -47,6 +47,9 @@ struct input_output_hashes {
   u8 secret_input_bufs_filled;
   u8 *secret_input_bufs[SECRET_BUFS_COUNT];
   u32 secret_input_buf_len[SECRET_BUFS_COUNT];
+
+  u8 *public_output_bufs[SECRET_BUFS_COUNT];
+  u32 public_output_buf_len[SECRET_BUFS_COUNT];
 };
 
 uint64_t input_hash(const void *input_str_w_len, uint64_t seed0, uint64_t seed1);
