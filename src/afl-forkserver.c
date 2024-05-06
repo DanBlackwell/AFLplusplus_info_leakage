@@ -1077,7 +1077,8 @@ void afl_fsrv_kill(afl_forkserver_t *fsrv) {
 
   if (fsrv->leakage_hunting) {
     close(fsrv->fsrv_stdout_fd);
-    fclose(fsrv->stdout_file);
+    if (fsrv->stdout_file)
+      fclose(fsrv->stdout_file);
 
     ck_free(fsrv->stdout_raw_buffer);
     fsrv->stdout_raw_buffer_alloced = 0;
